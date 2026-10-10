@@ -32,6 +32,8 @@ outputs:
   notion:
     database_id: null      # set to publish one page per meeting; token from $NOTION_TOKEN
     token_env: NOTION_TOKEN
+    # status_done: Done       # option names when the database has its own Status column
+    # status_stuck: WIP
 
 backup:
   remote: gdrive:Meetings  # rclone remote; null to disable. Files land in YYYY/MM/<job>/

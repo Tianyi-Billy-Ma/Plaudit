@@ -5,7 +5,7 @@ import logging
 from pathlib import Path
 
 from .config import secret
-from .http import post_json
+from .http import get_json, post_json
 from .models import Transcript
 
 log = logging.getLogger(__name__)
@@ -32,6 +32,10 @@ class MarkdownOutput:
 
 
 class NotionOutput:
+    """One page per meeting in an existing database. Columns are matched by name AND type, so the database
+    may be Plaudit's own (see create_notion_database) or a user's with different column types; missing
+    columns are skipped. Status option names come from the config (`status_done`, `status_stuck`)."""
+
     def __init__(self, cfg: dict):
         nc = cfg["outputs"]["notion"]
         self.database_id = nc["database_id"]
@@ -39,19 +43,32 @@ class NotionOutput:
         if not (self.database_id and token):
             raise RuntimeError("Notion output needs outputs.notion.database_id and the token env var")
         self.headers = {"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28"}
+        self.status = {"done": nc.get("status_done", "done"), "stuck": nc.get("status_stuck", "stuck")}
+        self.schema = {k: v["type"] for k, v in get_json(f"{NOTION}/databases/{self.database_id}", self.headers)["properties"].items()}
+
+    def _props(self, meta: dict, status: str) -> dict:
+        title_col = next(k for k, t in self.schema.items() if t == "title")
+        props = {title_col: {"title": [{"text": {"content": meta["title"]}}]}}
+        source = f"{meta['source']} {meta.get('source_id', '')}".strip()
+        candidates = {
+            "Date": {"date": {"start": meta["date"]}, "rich_text": [{"text": {"content": meta["date"]}}]},
+            "Duration (min)": {"number": meta.get("duration_min")},
+            "Source": {"rich_text": [{"text": {"content": source}}], "select": {"name": "Plaudit"}},
+            "Status": {"select": {"name": self.status[status]}, "status": {"name": self.status[status]}},
+            "Page Type": {"multi_select": [{"name": "Meeting"}]},
+        }
+        for col, by_type in candidates.items():
+            t = self.schema.get(col)
+            if t in by_type and by_type[t] is not None:
+                props[col] = {t: by_type[t]}
+        return props
 
     def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None) -> str:
-        props = {
-            "Name": {"title": [{"text": {"content": meta["title"]}}]},
-            "Date": {"date": {"start": meta["date"]}},
-            "Duration (min)": {"number": meta["duration_min"]},
-            "Source": {"rich_text": [{"text": {"content": f"{meta['source']} {meta.get('source_id', '')}".strip()}}]},
-            "Status": {"select": {"name": meta.get("status", "done")}},
-        }
         children = md_to_blocks(summary)
         if audio_link:
             children.append(_para(f"Audio: {audio_link}", link=audio_link))
-        page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id}, "properties": props,
+        page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id},
+                                              "properties": self._props(meta, meta.get("status", "done")),
                                               "children": children[:100]}, self.headers)
         # Transcript goes in a toggle; Notion caps 100 blocks per call and 2000 chars per rich text.
         toggle = post_json(f"{NOTION}/blocks/{page['id']}/children",
@@ -66,13 +83,8 @@ class NotionOutput:
 
     def publish_stuck(self, meta: dict, error: str) -> str:
         """A stub page so a job that has failed for 24 h is visible where the meetings are."""
-        props = {
-            "Name": {"title": [{"text": {"content": meta["title"]}}]},
-            "Date": {"date": {"start": meta["date"]}},
-            "Source": {"rich_text": [{"text": {"content": f"{meta['source']} {meta.get('source_id', '')}".strip()}}]},
-            "Status": {"select": {"name": "stuck"}},
-        }
-        page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id}, "properties": props,
+        page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id},
+                                              "properties": self._props(meta, "stuck"),
                                               "children": [_para(f"Plaudit could not process this recording: {error}"[:2000])]},
                          self.headers)
         return page.get("url", page["id"])

@@ -40,6 +40,15 @@ def post_json(url: str, payload: dict, headers: dict | None = None, timeout: int
     raise RuntimeError("unreachable")
 
 
+def get_json(url: str, headers: dict | None = None, timeout: int = 60) -> dict:
+    req = urllib.request.Request(url, headers={"User-Agent": UA, **(headers or {})})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        raise HttpError(e.code, e.read().decode(errors="replace")) from None
+
+
 def post_multipart(url: str, fields: dict[str, str], file_field: str, filename: str, content: bytes,
                    headers: dict | None = None, timeout: int = 600) -> dict:
     boundary = "----plaudit" + str(int(time.time() * 1000))
