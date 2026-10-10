@@ -1,0 +1,8 @@
+__pycache__/
+*.egg-info/
+dist/
+.venv/
+.pytest_cache/
+plaudit.yaml
+secrets.env
+data/
