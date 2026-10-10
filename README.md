@@ -14,7 +14,7 @@ pip install "plaudit[gpu]"     # adds qwen-asr, transformers and torch for local
 sudo apt install ffmpeg        # plus rclone if you want backups, Node 20+ and `npm i -g @plaud-ai/cli` for Plaud
 ```
 
-Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are never in the file; export them as environment variables:
+Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are never in the file and never on disk; they are environment variables. With 1Password: `op run --env-file deploy/secrets.op.env -- plaudit run` (that file holds only `op://` references).
 
 | Variable | Used for |
 | --- | --- |
