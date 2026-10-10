@@ -52,7 +52,7 @@ Drop a file into the watched folder (`sources.folder.path`) and it is picked up 
 | Output | Markdown folder, Notion database |
 | Backup | any rclone remote |
 
-Each is a small class with one method; see `src/plaudit/`. The Notion database needs these properties: `Name` (title), `Date` (date), `Duration (min)` (number), `Source` (text), `Status` (select).
+Each is a small class with one method; see `src/plaudit/`. `plaudit notion-init <parent page id>` creates the Notion database with the properties Plaudit writes (`Name`, `Date`, `Duration (min)`, `Source`, `Status`) and prints its id for `plaudit.yaml`. A job that keeps failing for 24 h gets a stub page with status `stuck`.
 
 ## Docker
 

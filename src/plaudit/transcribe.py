@@ -1,7 +1,6 @@
 """Transcription backends. Each fills in Segment.text for a list of speaker turns."""
 from __future__ import annotations
 
-import inspect
 import logging
 from pathlib import Path
 
@@ -25,8 +24,6 @@ class QwenASRTranscriber:
             cfg["transcription"]["model"], dtype=torch.bfloat16, device_map="cuda:0",
             max_inference_batch_size=8, max_new_tokens=512,
         )
-        # shortcut: glossary biasing only if this qwen_asr version exposes a `context` kwarg; verify in Phase 1
-        self.supports_context = "context" in inspect.signature(self.model.transcribe).parameters
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
         import numpy as np
@@ -38,11 +35,8 @@ class QwenASRTranscriber:
         for t in turns:
             a, b = int(t.start * SAMPLE_RATE) * 2, int(t.end * SAMPLE_RATE) * 2
             clips.append((np.frombuffer(pcm[a:b], dtype=np.int16).astype(np.float32) / 32768.0, SAMPLE_RATE))
-        kwargs = {"language": self.cfg["language"]}
-        terms = glossary(self.cfg)
-        if terms and self.supports_context:
-            kwargs["context"] = ", ".join(terms)
-        results = self.model.transcribe(audio=clips, **kwargs)
+        # qwen_asr>=0.0.6: `context` is the system prompt of each request, the documented way to bias terms
+        results = self.model.transcribe(audio=clips, context=", ".join(glossary(self.cfg)), language=self.cfg["language"])
         for t, r in zip(turns, results):
             t.text = r.text.strip()
         return turns

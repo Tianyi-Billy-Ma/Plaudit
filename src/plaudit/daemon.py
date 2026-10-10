@@ -84,8 +84,14 @@ class Queue:
             job["attempts"] += 1
             job["last_error"] = f"{type(e).__name__}: {e}"[:500]
             job.setdefault("first_failure", datetime.now().isoformat(timespec="seconds"))
-            if datetime.now() - datetime.fromisoformat(job["first_failure"]) > STUCK_AFTER:
+            if datetime.now() - datetime.fromisoformat(job["first_failure"]) > STUCK_AFTER and job["status"] != "stuck":
                 job["status"] = "stuck"
+                for sink in pipeline.sinks:
+                    if hasattr(sink, "publish_stuck"):
+                        try:
+                            job["stuck_page"] = sink.publish_stuck(job, job["last_error"])
+                        except Exception:
+                            log.exception("could not publish stuck page for %s", job["title"])
             log.exception("%s failed (attempt %d, status %s)", job["title"], job["attempts"], job["status"])
         self.save(job)
 

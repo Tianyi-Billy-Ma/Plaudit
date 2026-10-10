@@ -64,6 +64,35 @@ class NotionOutput:
             post_json(f"{NOTION}/blocks/{toggle_id}/children", {"children": lines[i:i + 100]}, self.headers)
         return page.get("url", page["id"])
 
+    def publish_stuck(self, meta: dict, error: str) -> str:
+        """A stub page so a job that has failed for 24 h is visible where the meetings are."""
+        props = {
+            "Name": {"title": [{"text": {"content": meta["title"]}}]},
+            "Date": {"date": {"start": meta["date"]}},
+            "Source": {"rich_text": [{"text": {"content": f"{meta['source']} {meta.get('source_id', '')}".strip()}}]},
+            "Status": {"select": {"name": "stuck"}},
+        }
+        page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id}, "properties": props,
+                                              "children": [_para(f"Plaudit could not process this recording: {error}"[:2000])]},
+                         self.headers)
+        return page.get("url", page["id"])
+
+
+def create_notion_database(token: str, parent_page_id: str, title: str = "Meetings") -> str:
+    """Create the Meetings database with the properties NotionOutput writes. Returns its id for plaudit.yaml."""
+    db = post_json(f"{NOTION}/databases", {
+        "parent": {"type": "page_id", "page_id": parent_page_id},
+        "title": [{"text": {"content": title}}],
+        "properties": {
+            "Name": {"title": {}},
+            "Date": {"date": {}},
+            "Duration (min)": {"number": {}},
+            "Source": {"rich_text": {}},
+            "Status": {"select": {"options": [{"name": "done", "color": "green"}, {"name": "stuck", "color": "red"}]}},
+        },
+    }, {"Authorization": f"Bearer {token}", "Notion-Version": "2022-06-28"})
+    return db["id"]
+
 
 def _ts(seconds: float) -> str:
     m, s = divmod(int(seconds), 60)

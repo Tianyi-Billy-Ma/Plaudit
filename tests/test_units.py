@@ -45,3 +45,34 @@ def test_md_to_blocks_and_safe():
     types = [b["type"] for b in md_to_blocks("## 摘要\n- a\n1. b\nplain\n### sub")]
     assert types == ["heading_2", "bulleted_list_item", "numbered_list_item", "paragraph", "heading_3"]
     assert safe("a/b:c 会议") == "a_b_c 会议"
+
+
+def test_stuck_job_gets_stub_page(cfg, clip, tmp_path):
+    from datetime import datetime, timedelta
+
+    from plaudit.daemon import Queue
+    from plaudit.pipeline import Pipeline
+    from plaudit.sources import new_job
+
+    class Boom:
+        def diarize(self, wav):
+            raise RuntimeError("down")
+
+    class StubSink:
+        def __init__(self):
+            self.calls = []
+
+        def publish(self, *a, **k):
+            return "x"
+
+        def publish_stuck(self, meta, error):
+            self.calls.append((meta["title"], error))
+            return "notion://stub"
+
+    sink = StubSink()
+    q = Queue(cfg)
+    job = new_job(q.data / "inbox", clip, "old failure", "manual")
+    job["first_failure"] = (datetime.now() - timedelta(hours=25)).isoformat(timespec="seconds")
+    q.process(job, Pipeline(cfg, diarizer=Boom(), transcriber=None, summarizer=None, sinks=[sink]))
+    assert job["status"] == "stuck" and job["stuck_page"] == "notion://stub"
+    assert sink.calls == [("old failure", "RuntimeError: down")]
