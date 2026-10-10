@@ -50,6 +50,8 @@ def test_md_to_blocks_and_safe():
 def test_stuck_job_gets_stub_page(cfg, clip, tmp_path):
     from datetime import datetime, timedelta
 
+    from conftest import FakeSummarizer, FakeTranscriber
+
     from plaudit.daemon import Queue
     from plaudit.pipeline import Pipeline
     from plaudit.sources import new_job
@@ -73,6 +75,6 @@ def test_stuck_job_gets_stub_page(cfg, clip, tmp_path):
     q = Queue(cfg)
     job = new_job(q.data / "inbox", clip, "old failure", "manual")
     job["first_failure"] = (datetime.now() - timedelta(hours=25)).isoformat(timespec="seconds")
-    q.process(job, Pipeline(cfg, diarizer=Boom(), transcriber=None, summarizer=None, sinks=[sink]))
+    q.process(job, Pipeline(cfg, diarizer=Boom(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(), sinks=[sink]))
     assert job["status"] == "stuck" and job["stuck_page"] == "notion://stub"
     assert sink.calls == [("old failure", "RuntimeError: down")]
