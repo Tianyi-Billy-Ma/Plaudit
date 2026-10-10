@@ -17,7 +17,7 @@ diarization:
 
 transcription:
   backend: qwen_asr
-  model: Qwen/Qwen3-ASR-1.7B
+  model: Qwen/Qwen3-ASR-1.7B-hf
 
 summary:
   base_url: http://oracle-host:8000/v1    # any OpenAI-compatible server (CPA, vLLM, Ollama, OpenAI)

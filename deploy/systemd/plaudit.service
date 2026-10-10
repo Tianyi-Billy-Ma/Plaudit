@@ -1,16 +1,15 @@
 # ~/.config/systemd/user/plaudit.service: one run per start, in a capped container. Pair with plaudit.timer.
-# Secrets are resolved by `op run` from 1Password at start and passed to the container as environment
-# variables; no application secret is written to disk. The only file on disk is the 1Password service-account
-# token (one line, OP_SERVICE_ACCOUNT_TOKEN=..., mode 600), see https://developer.1password.com/docs/service-accounts/
+# Secrets: ~/.config/secrets.env holds only the 1Password bootstrap (OP_SERVICE_ACCOUNT_TOKEN, OP_ENVIRONMENT_ID;
+# mode 600, also sourced by ~/.bashrc). `op run --environment` fetches the 1Password "Agent" environment at start
+# and the named variables are passed into the container; no application secret is written to disk.
 [Unit]
 Description=Plaudit: pull new recordings and process the queue once
 
 [Service]
 Type=oneshot
 WorkingDirectory=%h/plaudit
-EnvironmentFile=%h/.config/op/service-account.env
-ExecStart=/usr/bin/op run --env-file %h/plaudit/secrets.op.env --no-masking -- \
+ExecStart=/bin/bash -c '. %h/.config/secrets.env && exec %h/.local/bin/op run --environment "$OP_ENVIRONMENT_ID" --no-masking -- \
   /usr/bin/docker run --rm --gpus all --memory=7g --memory-swap=7g \
-  -e PLAUDIT_SUMMARY_API_KEY -e NOTION_TOKEN \
+  -e CPA_API_KEY -e CLAUDE_NOTION_API_KEY \
   -v %h/plaudit:/plaudit -v %h/.plaud:/root/.plaud -v %h/.config/rclone:/root/.config/rclone \
-  plaudit:0.1.0 run
+  plaudit:0.1.0 run'
