@@ -1,0 +1,11 @@
+# systemctl --user enable --now plaudit.timer   (stop everything: systemctl --user disable --now plaudit.timer)
+[Unit]
+Description=Run Plaudit every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target
