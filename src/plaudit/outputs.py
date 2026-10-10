@@ -69,7 +69,7 @@ class NotionOutput:
         if audio_link:
             children.append(_para(f"Audio: {audio_link}", link=audio_link))
         page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id},
-                                              "properties": self._props(meta, meta.get("status", "done")),
+                                              "properties": self._props(meta, "done"),  # meta["status"] is the job state (waiting), not the column
                                               "children": children[:100]}, self.headers)
         # Transcript goes in a toggle; Notion caps 100 blocks per call and 2000 chars per rich text.
         toggle = post_json(f"{NOTION}/blocks/{page['id']}/children",
