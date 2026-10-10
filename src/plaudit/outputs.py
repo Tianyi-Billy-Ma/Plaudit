@@ -55,7 +55,8 @@ class NotionOutput:
             "Duration (min)": {"number": meta.get("duration_min")},
             "Source": {"rich_text": [{"text": {"content": source}}], "select": {"name": "Plaudit"}},
             "Status": {"select": {"name": self.status[status]}, "status": {"name": self.status[status]}},
-            "Page Type": {"multi_select": [{"name": "Meeting"}]},
+            "Page Type": {"multi_select": [{"name": "Meeting"}, {"name": "Audio"}]},
+            "PARA": {"select": {"name": "Resource"}},
         }
         for col, by_type in candidates.items():
             t = self.schema.get(col)

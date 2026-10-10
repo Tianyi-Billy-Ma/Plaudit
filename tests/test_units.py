@@ -83,14 +83,15 @@ def test_stuck_job_gets_stub_page(cfg, clip, tmp_path):
 def test_notion_props_follow_the_database_schema(monkeypatch):
     from plaudit import outputs
 
-    schema = {"Name": "title", "Date": "rich_text", "Status": "status", "Page Type": "multi_select", "Source": "select"}
+    schema = {"Name": "title", "Date": "rich_text", "Status": "status", "Page Type": "multi_select", "Source": "select", "PARA": "select"}
     monkeypatch.setattr(outputs, "get_json", lambda url, headers=None: {"properties": {k: {"type": t} for k, t in schema.items()}})
     monkeypatch.setenv("NT", "x")
     out = outputs.NotionOutput({"outputs": {"notion": {"database_id": "db", "token_env": "NT", "status_done": "Done", "status_stuck": "WIP"}}})
     props = out._props({"title": "m", "date": "2026-10-05", "source": "plaud", "source_id": "of_1", "duration_min": 14.1}, "done")
     assert props["Date"] == {"rich_text": [{"text": {"content": "2026-10-05"}}]}
     assert props["Status"] == {"status": {"name": "Done"}}
-    assert props["Page Type"] == {"multi_select": [{"name": "Meeting"}]}
+    assert props["Page Type"] == {"multi_select": [{"name": "Meeting"}, {"name": "Audio"}]}
+    assert props["PARA"] == {"select": {"name": "Resource"}}
     assert props["Source"] == {"select": {"name": "Plaudit"}}
     assert "Duration (min)" not in props
     assert out._props({"title": "m", "date": "d", "source": "plaud"}, "stuck")["Status"] == {"status": {"name": "WIP"}}
