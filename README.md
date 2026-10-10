@@ -14,7 +14,7 @@ pip install "plaudit[gpu]"     # adds qwen-asr, transformers and torch for local
 sudo apt install ffmpeg        # plus rclone if you want backups, Node 20+ and `npm i -g @plaud-ai/cli` for Plaud
 ```
 
-Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are never in the file; export them as environment variables:
+Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are never in the file and never on disk; they are environment variables. With 1Password: `op run --env-file deploy/secrets.op.env -- plaudit run` (that file holds only `op://` references).
 
 | Variable | Used for |
 | --- | --- |
@@ -52,7 +52,7 @@ Drop a file into the watched folder (`sources.folder.path`) and it is picked up 
 | Output | Markdown folder, Notion database |
 | Backup | any rclone remote |
 
-Each is a small class with one method; see `src/plaudit/`. The Notion database needs these properties: `Name` (title), `Date` (date), `Duration (min)` (number), `Source` (text), `Status` (select).
+Each is a small class with one method; see `src/plaudit/`. `plaudit notion-init <parent page id>` creates the Notion database with the properties Plaudit writes (`Name`, `Date`, `Duration (min)`, `Source`, `Status`) and prints its id for `plaudit.yaml`. A job that keeps failing for 24 h gets a stub page with status `stuck`.
 
 ## Docker
 

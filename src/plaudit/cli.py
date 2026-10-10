@@ -26,10 +26,21 @@ def main(argv=None) -> int:
     one.add_argument("--date", default=date.today().isoformat())
     sub.add_parser("pull", help="only fetch new recordings into the queue")
     sub.add_parser("status", help="list queued jobs")
+    ni = sub.add_parser("notion-init", help="create the Meetings database under a Notion page (token from $NOTION_TOKEN)")
+    ni.add_argument("parent_page_id")
+    ni.add_argument("--title", default="Meetings")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     cfg = config.load(args.config)
+    if args.cmd == "notion-init":
+        from .outputs import create_notion_database
+
+        token = config.secret(cfg["outputs"]["notion"]["token_env"])
+        if not token:
+            ap.error(f"set ${cfg['outputs']['notion']['token_env']} first")
+        print(create_notion_database(token, args.parent_page_id, args.title))
+        return 0
     q = Queue(cfg)
     if args.cmd == "run":
         while True:
