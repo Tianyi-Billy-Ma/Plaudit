@@ -8,7 +8,7 @@ Description=Plaudit: pull new recordings and process the queue once
 [Service]
 Type=oneshot
 WorkingDirectory=%h/plaudit
-ExecStart=/bin/bash -c '. %h/.config/secrets.env && exec %h/.local/bin/op run --environment "$OP_ENVIRONMENT_ID" --no-masking -- \
+ExecStart=/bin/bash -c '. %h/.config/secrets.env && exec %h/.local/bin/op run --environment "$$OP_ENVIRONMENT_ID" --no-masking -- \
   /usr/bin/docker run --rm --gpus all --memory=7g --memory-swap=7g \
   -e CPA_API_KEY -e CLAUDE_NOTION_API_KEY \
   -v %h/plaudit:/plaudit -v %h/.plaud:/root/.plaud -v %h/.config/rclone:/root/.config/rclone \
