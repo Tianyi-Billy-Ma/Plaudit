@@ -41,7 +41,11 @@ class Summarizer:
             "model": self.model, "temperature": 0.2,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
         }, self.headers)
-        return resp["choices"][0]["message"]["content"].strip()
+        msg = resp["choices"][0]["message"]
+        # reasoning models (GLM) put thinking in reasoning_content; content is null when the budget ran out
+        if not msg.get("content"):
+            raise RuntimeError(f"empty summary from {self.model} (finish_reason={resp['choices'][0].get('finish_reason')})")
+        return msg["content"].strip()
 
     def summarize(self, transcript_text: str, glossary: list[str] = ()) -> str:
         system = PROMPTS[self.lang]
