@@ -1,0 +1,39 @@
+# Plaudit reference config: local models on one GPU box, summary through an OpenAI-compatible endpoint.
+data_dir: ~/plaudit/data
+glossary: ~/plaudit/glossary.txt
+language: null            # auto-detect; or "Chinese" / "English"
+
+sources:
+  folder:
+    path: ~/plaudit/inbox
+  plaud:
+    enabled: true          # needs `plaud login` once
+    lookback_days: 7
+
+diarization:
+  backend: nemotron        # or none
+  model: nvidia/Nemotron-3-Diarization
+  max_turn_seconds: 30
+
+transcription:
+  backend: qwen_asr
+  model: Qwen/Qwen3-ASR-1.7B
+
+summary:
+  base_url: http://oracle-host:8000/v1    # any OpenAI-compatible server (CPA, vLLM, Ollama, OpenAI)
+  model: glm-5.3-flash
+  api_key_env: PLAUDIT_SUMMARY_API_KEY
+  language: zh             # zh: 摘要/决定/行动项 with English terms kept; en: Summary/Decisions/Action items
+  chunk_chars: 12000
+
+outputs:
+  markdown:
+    dir: ~/plaudit/data/notes
+  notion:
+    database_id: null      # set to publish one page per meeting; token from $NOTION_TOKEN
+    token_env: NOTION_TOKEN
+
+backup:
+  remote: gdrive:Meetings  # rclone remote; null to disable. Files land in YYYY/MM/<job>/
+retention_days: 7          # delete local copies this long after a verified backup
+min_free_mem_gb: 8         # do not start a job below this MemAvailable

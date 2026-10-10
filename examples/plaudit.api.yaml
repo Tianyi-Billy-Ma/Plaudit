@@ -1,0 +1,29 @@
+# Plaudit without a GPU: transcription and summary over HTTP, Markdown output only.
+data_dir: ~/plaudit/data
+glossary: ~/plaudit/glossary.txt
+
+sources:
+  folder:
+    path: ~/plaudit/inbox
+
+diarization:
+  backend: none
+
+transcription:
+  backend: openai
+  base_url: http://localhost:8080/v1   # e.g. a whisper.cpp server or qwen-asr-serve
+  model: whisper-1
+  api_key_env: PLAUDIT_ASR_API_KEY
+
+summary:
+  base_url: http://localhost:11434/v1  # e.g. Ollama
+  model: qwen3:8b
+  api_key_env: PLAUDIT_SUMMARY_API_KEY
+  language: en
+
+outputs:
+  markdown:
+    dir: ~/plaudit/data/notes
+
+backup:
+  remote: null

@@ -1,0 +1,19 @@
+# One short-lived container per run: `docker compose run --rm plaudit` (the systemd timer does this every 5 min).
+services:
+  plaudit:
+    build: .
+    image: plaudit:0.1.0
+    env_file: ${HOME}/plaudit/secrets.env      # mode 600, values from your password manager
+    volumes:
+      - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/, hf/ model cache
+      - ${HOME}/.plaud:/root/.plaud            # Plaud CLI login
+      - ${HOME}/.config/rclone:/root/.config/rclone
+    mem_limit: 7g
+    memswap_limit: 7g
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
