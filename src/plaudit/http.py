@@ -6,6 +6,11 @@ import time
 import urllib.error
 import urllib.request
 
+from . import __version__
+
+# Cloudflare in front of some endpoints rejects the default urllib agent (error 1010)
+UA = f"plaudit/{__version__}"
+
 
 class HttpError(RuntimeError):
     def __init__(self, status: int, body: str):
@@ -15,7 +20,7 @@ class HttpError(RuntimeError):
 
 def post_json(url: str, payload: dict, headers: dict | None = None, timeout: int = 600, retries: int = 3) -> dict:
     data = json.dumps(payload).encode()
-    hdrs = {"Content-Type": "application/json", **(headers or {})}
+    hdrs = {"Content-Type": "application/json", "User-Agent": UA, **(headers or {})}
     for attempt in range(retries):
         req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
         try:
@@ -43,7 +48,7 @@ def post_multipart(url: str, fields: dict[str, str], file_field: str, filename: 
         body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()
     body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\n"
              f"Content-Type: audio/wav\r\n\r\n").encode() + content + f"\r\n--{boundary}--\r\n".encode()
-    hdrs = {"Content-Type": f"multipart/form-data; boundary={boundary}", **(headers or {})}
+    hdrs = {"Content-Type": f"multipart/form-data; boundary={boundary}", "User-Agent": UA, **(headers or {})}
     req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
