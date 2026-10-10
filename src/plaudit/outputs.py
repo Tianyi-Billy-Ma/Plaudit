@@ -74,11 +74,11 @@ class NotionOutput:
         toggle = post_json(f"{NOTION}/blocks/{page['id']}/children",
                            {"children": [{"object": "block", "type": "toggle",
                                           "toggle": {"rich_text": [{"text": {"content": "Transcript"}}]}}]},
-                           self.headers, )
+                           self.headers, method="PATCH")  # Notion appends children with PATCH
         toggle_id = toggle["results"][0]["id"]
         lines = [_para(f"[{_ts(s.start)}] {s.speaker}: {s.text}"[:2000]) for s in transcript.segments if s.text]
         for i in range(0, len(lines), 100):
-            post_json(f"{NOTION}/blocks/{toggle_id}/children", {"children": lines[i:i + 100]}, self.headers)
+            post_json(f"{NOTION}/blocks/{toggle_id}/children", {"children": lines[i:i + 100]}, self.headers, method="PATCH")
         return page.get("url", page["id"])
 
     def publish_stuck(self, meta: dict, error: str) -> str:

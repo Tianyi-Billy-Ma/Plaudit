@@ -18,11 +18,12 @@ class HttpError(RuntimeError):
         self.status = status
 
 
-def post_json(url: str, payload: dict, headers: dict | None = None, timeout: int = 600, retries: int = 3) -> dict:
+def post_json(url: str, payload: dict, headers: dict | None = None, timeout: int = 600, retries: int = 3,
+              method: str = "POST") -> dict:
     data = json.dumps(payload).encode()
     hdrs = {"Content-Type": "application/json", "User-Agent": UA, **(headers or {})}
     for attempt in range(retries):
-        req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
+        req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode())
