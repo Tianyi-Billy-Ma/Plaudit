@@ -13,20 +13,22 @@ log = logging.getLogger(__name__)
 
 
 class QwenASRTranscriber:
-    """Qwen/Qwen3-ASR-1.7B via the qwen_asr package, batched over speaker turns."""
+    """Qwen/Qwen3-ASR-1.7B-hf through transformers (>=5.16 ships the model), batched over speaker turns."""
+
+    BATCH = 8
 
     def __init__(self, cfg: dict):
         import torch
-        from qwen_asr import Qwen3ASRModel
+        from transformers import AutoModelForMultimodalLM, AutoProcessor
 
         self.cfg = cfg
-        self.model = Qwen3ASRModel.from_pretrained(
-            cfg["transcription"]["model"], dtype=torch.bfloat16, device_map="cuda:0",
-            max_inference_batch_size=8, max_new_tokens=512,
-        )
+        model_id = cfg["transcription"]["model"]
+        self.processor = AutoProcessor.from_pretrained(model_id)
+        self.model = AutoModelForMultimodalLM.from_pretrained(model_id, dtype=torch.bfloat16, device_map="cuda:0").eval()
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
         import numpy as np
+        import torch
 
         from .audio import SAMPLE_RATE
 
@@ -34,11 +36,19 @@ class QwenASRTranscriber:
         clips = []
         for t in turns:
             a, b = int(t.start * SAMPLE_RATE) * 2, int(t.end * SAMPLE_RATE) * 2
-            clips.append((np.frombuffer(pcm[a:b], dtype=np.int16).astype(np.float32) / 32768.0, SAMPLE_RATE))
-        # qwen_asr>=0.0.6: `context` is the system prompt of each request, the documented way to bias terms
-        results = self.model.transcribe(audio=clips, context=", ".join(glossary(self.cfg)), language=self.cfg["language"])
-        for t, r in zip(turns, results):
-            t.text = r.text.strip()
+            clips.append(np.frombuffer(pcm[a:b], dtype=np.int16).astype(np.float32) / 32768.0)
+        # the glossary goes in as the system prompt (`prompt`), the documented way to bias terms
+        prompt = ", ".join(glossary(self.cfg)) or None
+        for i in range(0, len(clips), self.BATCH):
+            batch = clips[i:i + self.BATCH]
+            inputs = self.processor.apply_transcription_request(
+                batch, prompt=prompt, language=self.cfg["language"],
+            ).to(self.model.device, self.model.dtype)
+            with torch.inference_mode():
+                out = self.model.generate(**inputs, max_new_tokens=512)
+            texts = self.processor.decode(out[:, inputs["input_ids"].shape[1]:], return_format="transcription_only")
+            for t, text in zip(turns[i:i + self.BATCH], texts):
+                t.text = text.strip()
         return turns
 
 

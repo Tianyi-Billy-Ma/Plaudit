@@ -10,11 +10,11 @@ Plaudit is not affiliated with Plaud. It reads Plaud recordings only through the
 
 ```bash
 pip install plaudit            # core (watched folder, API transcription, Markdown/Notion output)
-pip install "plaudit[gpu]"     # adds qwen-asr, transformers and torch for local models
+pip install "plaudit[gpu]"     # adds transformers and torch for local models (Qwen3-ASR and Nemotron both ship in transformers)
 sudo apt install ffmpeg        # plus rclone if you want backups, Node 20+ and `npm i -g @plaud-ai/cli` for Plaud
 ```
 
-Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are never in the file and never on disk; they are environment variables. With 1Password: `op run --env-file deploy/secrets.op.env -- plaudit run` (that file holds only `op://` references).
+Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are never in the file and never on disk; they are environment variables. With 1Password: `op run --environment <id> -- plaudit run`, and set `api_key_env` / `token_env` in the config to the variable names that environment provides.
 
 | Variable | Used for |
 | --- | --- |
