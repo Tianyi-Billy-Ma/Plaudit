@@ -34,7 +34,6 @@ class Summarizer:
         self.headers = {}
         if key := secret(sc.get("api_key_env")):
             self.headers["Authorization"] = f"Bearer {key}"
-        self.glossary_note = ""
 
     def _chat(self, system: str, user: str) -> str:
         resp = post_json(self.url, {

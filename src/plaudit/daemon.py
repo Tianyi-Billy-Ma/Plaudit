@@ -5,7 +5,7 @@ import fcntl
 import json
 import logging
 import shutil
-import time
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -51,12 +51,21 @@ class Queue:
                 log.exception("source %s failed", type(src).__name__)
         return n
 
-    def run_once(self, pipeline: Pipeline | None = None) -> None:
+    @contextmanager
+    def lock(self):
+        """One pipeline at a time per data dir; yields False when another run holds the lock."""
         with open(self.data / "plaudit.lock", "w") as lock:
             try:
                 fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError:
                 log.info("another plaudit run holds the lock; skipping")
+                yield False
+                return
+            yield True
+
+    def run_once(self, pipeline: Pipeline | None = None) -> None:
+        with self.lock() as got:
+            if not got:
                 return
             log.info("pulled %d new recording(s)", self.pull())
             for job in self.jobs():
@@ -77,9 +86,7 @@ class Queue:
             shutil.move(job["audio"], workdir / Path(job["audio"]).name)
             job.update(status="done", links=result["links"], finished_at=datetime.now().isoformat(timespec="seconds"),
                        duration_min=result["meta"]["duration_min"])
-            if remote := self.cfg["backup"]["remote"]:
-                job["backup"] = backup_dir(workdir, remote, job["date"])
-            log.info("%s done: %s", job["title"], result["links"])
+            log.info("%s done: %s", job["title"], result["links"])  # backup happens in retire(), same run
         except Exception as e:
             job["attempts"] += 1
             job["last_error"] = f"{type(e).__name__}: {e}"[:500]
@@ -96,10 +103,21 @@ class Queue:
         self.save(job)
 
     def retire(self) -> None:
-        """Delete local copies only after a verified backup and the retention period."""
+        """Back up done jobs that still lack a backup, then delete local copies only after a verified backup
+        and the retention period."""
         cutoff = datetime.now() - timedelta(days=self.cfg["retention_days"])
+        remote = self.cfg["backup"]["remote"]
         for job in self.jobs():
-            if job["status"] == "done" and job.get("backup") and datetime.fromisoformat(job["finished_at"]) < cutoff:
+            if job["status"] != "done":
+                continue
+            if remote and not job.get("backup"):
+                try:
+                    job["backup"] = backup_dir(self.done_dir / job["id"], remote, job["date"])
+                    self.save(job)
+                except Exception:
+                    log.exception("backup of %s failed; will retry next run", job["title"])
+                    continue
+            if job.get("backup") and datetime.fromisoformat(job["finished_at"]) < cutoff:
                 shutil.rmtree(self.done_dir / job["id"], ignore_errors=True)
                 job["status"] = "retired"
                 self.save(job)

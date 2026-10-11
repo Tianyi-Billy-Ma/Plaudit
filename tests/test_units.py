@@ -95,3 +95,34 @@ def test_notion_props_follow_the_database_schema(monkeypatch):
     assert props["Source"] == {"select": {"name": "Plaudit"}}
     assert "Duration (min)" not in props
     assert out._props({"title": "m", "date": "d", "source": "plaud"}, "stuck")["Status"] == {"status": {"name": "WIP"}}
+
+
+def test_local_date_converts_plaud_utc_timestamps(monkeypatch):
+    import time
+
+    from plaudit.sources import local_date
+
+    monkeypatch.setenv("TZ", "America/New_York")
+    time.tzset()
+    assert local_date("2026-10-08T20:01:01.781000") == "2026-10-08"  # 16:01 EDT
+    assert local_date("2026-10-07T02:32:12") == "2026-10-06"  # 22:32 EDT the evening before
+    assert local_date("2026-10-07T02:32:12Z") == "2026-10-06"
+    assert local_date("2026-10-05") == "2026-10-05"
+
+
+def test_folder_pull_yields_each_job_as_its_file_lands(cfg, tmp_path):
+    import os
+
+    from plaudit.sources import FolderSource
+
+    inbox = tmp_path / "data" / "inbox"
+    inbox.mkdir(parents=True)
+    folder = tmp_path / "inbox"
+    folder.mkdir()
+    for name in ("a.wav", "b.wav"):
+        (folder / name).write_bytes(b"x")
+        os.utime(folder / name, (0, 0))
+    gen = FolderSource(cfg, inbox).pull()
+    first = next(gen)  # the first job exists before the second file is touched
+    assert first["title"] == "a" and (folder / "b.wav").exists() and not (folder / "a.wav").exists()
+    assert next(gen)["title"] == "b"

@@ -57,7 +57,10 @@ def main(argv=None) -> int:
         return 0
     src = Path(args.file)
     job = new_job(q.data / "inbox", src, args.title or src.stem, "manual", when=args.date)
-    result = Pipeline(cfg).process(src, job, q.done_dir / job["id"])
+    with q.lock() as got:
+        if not got:
+            ap.error("another plaudit run is in progress; try again in a minute")
+        result = Pipeline(cfg).process(src, job, q.done_dir / job["id"])
     print(result["summary"] or result["transcript"].as_text())
     print("\n".join(result["links"]))
     return 0

@@ -52,3 +52,33 @@ def test_failed_job_stays_waiting(cfg, clip, tmp_path):
 
 def test_mem_available():
     assert round(mem_available_gb("MemTotal: 1 kB\nMemAvailable:  8388608 kB\n"), 1) == 8.0
+
+
+def test_retire_backs_up_then_deletes_after_retention(cfg, tmp_path, monkeypatch):
+    from datetime import datetime, timedelta
+
+    from plaudit import daemon
+
+    cfg["backup"]["remote"] = "remote:Meetings"
+    q = Queue(cfg)
+    old = (datetime.now() - timedelta(days=8)).isoformat(timespec="seconds")
+    for jid, finished in (("a-old", old), ("b-new", datetime.now().isoformat(timespec="seconds"))):
+        (q.done_dir / jid).mkdir()
+        q.save({"id": jid, "title": jid, "date": "2026-10-01", "status": "done", "finished_at": finished})
+    calls = []
+    monkeypatch.setattr(daemon, "backup_dir", lambda local, remote, date: calls.append(local.name) or f"{remote}/2026/10/{local.name}")
+    q.retire()
+    by_id = {j["id"]: j for j in q.jobs()}
+    assert calls == ["a-old", "b-new"]  # a done job without a backup gets one
+    assert by_id["a-old"]["status"] == "retired" and not (q.done_dir / "a-old").exists()
+    assert by_id["b-new"]["status"] == "done" and (q.done_dir / "b-new").exists()
+
+    def boom(local, remote, date):
+        raise RuntimeError("drive down")
+
+    (q.done_dir / "c").mkdir()
+    q.save({"id": "c", "title": "c", "date": "2026-10-01", "status": "done", "finished_at": old})
+    monkeypatch.setattr(daemon, "backup_dir", boom)
+    q.retire()
+    c = {j["id"]: j for j in q.jobs()}["c"]
+    assert c["status"] == "done" and "backup" not in c and (q.done_dir / "c").exists()  # never delete without a backup

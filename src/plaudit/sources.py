@@ -9,8 +9,9 @@ import shutil
 import subprocess
 import time
 import urllib.request
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Iterator
 
 log = logging.getLogger(__name__)
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".mp4", ".webm", ".wma"}
@@ -18,9 +19,19 @@ AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".mp4", "
 
 def new_job(inbox: Path, audio: Path, title: str, source: str, source_id: str = "", when: str | None = None) -> dict:
     jid = time.strftime("%Y%m%d-%H%M%S") + "-" + re.sub(r"\W+", "", source_id or title)[:24]
-    return {"id": jid, "title": title, "date": (when or date.today().isoformat())[:10], "source": source,
+    return {"id": jid, "title": title, "date": local_date(when), "source": source,
             "source_id": source_id, "audio": str(audio), "created_at": datetime.now().isoformat(timespec="seconds"),
             "status": "waiting", "attempts": 0}
+
+
+def local_date(when: str | None) -> str:
+    """YYYY-MM-DD in local time. A bare date stays as is; a timestamp without zone is UTC (what Plaud returns)."""
+    if not when:
+        return date.today().isoformat()
+    if len(when) <= 10:
+        return when[:10]
+    dt = datetime.fromisoformat(when.replace("Z", "+00:00"))
+    return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone().date().isoformat()
 
 
 class FolderSource:
@@ -30,10 +41,10 @@ class FolderSource:
         self.dir = Path(cfg["sources"]["folder"]["path"])
         self.inbox = inbox
 
-    def pull(self) -> list[dict]:
-        jobs = []
+    def pull(self) -> Iterator[dict]:
+        """A generator, so the queue saves each job as soon as its file is in place."""
         if not self.dir.exists():
-            return jobs
+            return
         for f in sorted(self.dir.iterdir()):
             if f.suffix.lower() not in AUDIO_EXT or f.name.startswith("."):
                 continue
@@ -42,8 +53,7 @@ class FolderSource:
             when = datetime.fromtimestamp(f.stat().st_mtime).isoformat()
             dest = self.inbox / f"{int(time.time())}-{f.name}"
             shutil.move(str(f), dest)
-            jobs.append(new_job(self.inbox, dest, f.stem, "folder", when=when))
-        return jobs
+            yield new_job(self.inbox, dest, f.stem, "folder", when=when)
 
 
 class PlaudSource:
@@ -59,10 +69,9 @@ class PlaudSource:
         env = {**os.environ, "NO_COLOR": "1", "FORCE_COLOR": "0"}
         return subprocess.run(["plaud", *args], check=True, capture_output=True, text=True, env=env, timeout=120).stdout
 
-    def pull(self) -> list[dict]:
+    def pull(self) -> Iterator[dict]:
         since = (date.today() - timedelta(days=self.lookback)).isoformat()
         ids = parse_file_ids(self._plaud("files", "-s", "100", "--date-from", since))
-        jobs = []
         for fid in ids:
             if fid in self.seen:
                 continue
@@ -73,12 +82,17 @@ class PlaudSource:
                 continue
             ext = Path(url.split("?")[0]).suffix or ".mp3"
             dest = self.inbox / f"plaud-{fid}{ext}"
-            urllib.request.urlretrieve(url, dest)
+            download(url, dest)
             self.seen.add(fid)
             self.seen_path.write_text(json.dumps(sorted(self.seen)))
-            jobs.append(new_job(self.inbox, dest, details.get("name") or f"Plaud {fid}", "plaud", fid,
-                                details.get("start_at") or details.get("created_at")))
-        return jobs
+            yield new_job(self.inbox, dest, details.get("name") or f"Plaud {fid}", "plaud", fid,
+                          details.get("start_at") or details.get("created_at"))
+
+
+def download(url: str, dest: Path, timeout: int = 300) -> None:
+    """urlretrieve has no timeout; a stalled download would hold the queue lock forever."""
+    with urllib.request.urlopen(url, timeout=timeout) as r, open(dest, "wb") as f:
+        shutil.copyfileobj(r, f)
 
 
 # shortcut: `plaud files` has no --json flag, so we read its table; upgrade when the CLI grows one
