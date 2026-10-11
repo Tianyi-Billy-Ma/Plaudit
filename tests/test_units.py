@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from plaudit.diarize import merge_turns, split_turns
 from plaudit.models import Segment
 from plaudit.outputs import md_to_blocks, safe
@@ -126,3 +128,44 @@ def test_folder_pull_yields_each_job_as_its_file_lands(cfg, tmp_path):
     first = next(gen)  # the first job exists before the second file is touched
     assert first["title"] == "a" and (folder / "b.wav").exists() and not (folder / "a.wav").exists()
     assert next(gen)["title"] == "b"
+
+
+def test_folder_date_is_local_and_ids_are_unique(cfg, tmp_path, monkeypatch):
+    import os
+    import time
+    from datetime import datetime
+
+    from plaudit.sources import FolderSource
+
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    time.tzset()
+    watched = Path(cfg["sources"]["folder"]["path"])
+    watched.mkdir(parents=True, exist_ok=True)
+    late = datetime(2026, 10, 8, 23, 0).timestamp()  # 23:00 local = 15:00 UTC, still 2026-10-08
+    for name in ("Meeting.mp3", "Meeting.wav"):
+        (watched / name).write_bytes(b"x")
+        os.utime(watched / name, (late, late))
+    (tmp_path / "queue-inbox").mkdir()
+    jobs = list(FolderSource(cfg, tmp_path / "queue-inbox").pull())
+    assert [j["date"] for j in jobs] == ["2026-10-08", "2026-10-08"]
+    assert jobs[0]["id"] != jobs[1]["id"]
+
+
+def test_markdown_output_never_overwrites(cfg, tmp_path):
+    from plaudit.models import Transcript
+    from plaudit.outputs import MarkdownOutput
+
+    out = MarkdownOutput(cfg)
+    t = Transcript([], "zh")
+    meta = {"date": "2026-10-11", "title": "Lab", "duration_min": 1, "source": "manual"}
+    a = out.publish({**meta, "id": "a"}, "first", t)
+    b = out.publish({**meta, "id": "b"}, "second", t)
+    assert a != b and "first" in Path(a).read_text() and "second" in Path(b).read_text()
+
+
+def test_config_allows_notion_only(tmp_path):
+    from plaudit import config
+
+    p = tmp_path / "c.yaml"
+    p.write_text("outputs:\n  markdown: null\n  notion:\n    database_id: abc\n")
+    assert config.load(p)["outputs"]["markdown"] is None

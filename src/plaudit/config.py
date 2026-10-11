@@ -47,7 +47,8 @@ def load(path: str | os.PathLike | None = None) -> dict:
     for key in ("data_dir", "glossary"):
         cfg[key] = str(Path(cfg[key]).expanduser())
     cfg["sources"]["folder"]["path"] = str(Path(cfg["sources"]["folder"]["path"]).expanduser())
-    cfg["outputs"]["markdown"]["dir"] = str(Path(cfg["outputs"]["markdown"]["dir"]).expanduser())
+    if cfg["outputs"].get("markdown"):
+        cfg["outputs"]["markdown"]["dir"] = str(Path(cfg["outputs"]["markdown"]["dir"]).expanduser())
     return cfg
 
 

@@ -10,6 +10,8 @@ from pathlib import Path
 from . import __version__, config
 from .daemon import Queue
 from .pipeline import Pipeline
+
+log = logging.getLogger(__name__)
 from .sources import new_job
 
 
@@ -44,9 +46,13 @@ def main(argv=None) -> int:
     q = Queue(cfg)
     if args.cmd == "run":
         while True:
-            q.run_once()
             if not args.loop:
+                q.run_once()
                 return 0
+            try:
+                q.run_once()
+            except Exception:
+                log.exception("run failed; next cycle in %ss", args.loop)
             time.sleep(args.loop)
     if args.cmd == "pull":
         print(f"queued {q.pull()} new recording(s)")
