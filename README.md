@@ -11,7 +11,7 @@ Plaudit is not affiliated with Plaud. It reads Plaud recordings only through the
 ```bash
 pip install plaudit            # core (watched folder, API transcription, Markdown/Notion output)
 pip install "plaudit[gpu]"     # adds transformers and torch for local models (Qwen3-ASR and Nemotron both ship in transformers)
-sudo apt install ffmpeg        # plus rclone if you want backups, Node 20+ and `npm i -g @plaud-ai/cli` for Plaud
+sudo apt install ffmpeg        # plus rclone if you want backups, Node 22+ and `npm i -g @plaud-ai/cli` for Plaud
 ```
 
 Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are never in the file and never on disk; they are environment variables. With 1Password: `op run --environment <id> -- plaudit run`, and set `api_key_env` / `token_env` in the config to the variable names that environment provides.
@@ -27,7 +27,7 @@ Then:
 ```bash
 plaudit process meeting.m4a          # one file, prints the summary
 plaudit run                          # pull new recordings, process the queue once, exit
-plaudit run --loop 300               # same, every 5 minutes (or use the systemd timer in deploy/)
+plaudit run --loop 300               # same, every 5 minutes; models are reloaded each cycle so memory is free in between
 plaudit status                       # what is waiting, done, stuck
 ```
 
@@ -37,7 +37,8 @@ Drop a file into the watched folder (`sources.folder.path`) and it is picked up 
 
 - One job at a time, behind a lock file. A run starts a job only when `MemAvailable` is above `min_free_mem_gb`, so a shared GPU box is never pushed over the edge.
 - Audio is transcribed per speaker turn, max 30 s each, never as one long tensor.
-- Failures stay queued and retry on the next run. After 24 h of failures a job is marked `stuck` in `plaudit status`. There is no paid fallback.
+- Failures stay queued and retry on the next run. After 24 h of failures a job is marked `stuck` in `plaudit status`. There is no paid fallback. A Notion page is created once; if appending the transcript fails, the page stays without it rather than being duplicated on retry.
+- A backup that fails is retried on every later run until it passes.
 - Local copies are deleted only after `rclone check` has verified the backup and `retention_days` have passed.
 - The glossary (`glossary.txt`, one term per line) is read fresh for every job and passed to the ASR model and the summariser.
 
@@ -56,7 +57,7 @@ Each is a small class with one method; see `src/plaudit/`. `plaudit notion-init 
 
 ## Docker
 
-`Dockerfile` builds an image with ffmpeg, rclone, Node 20, the Plaud CLI and the GPU extras. `docker-compose.yml` and `deploy/systemd/` show a per-job container started by a systemd user timer with a hard memory cap.
+`Dockerfile` builds an image with ffmpeg, rclone, Node 22, the Plaud CLI and the GPU extras. The default base image is for aarch64 (DGX Spark); pass `--build-arg BASE=vllm/vllm-openai:v0.29.0` on x86_64, or `--build-arg BASE=python:3.12-slim --build-arg EXTRAS=` for the CPU/API mode. `docker-compose.yml` and `deploy/systemd/` show a per-job container started by a systemd user timer with a hard memory cap; mount `/etc/localtime` so meeting dates are in your time zone.
 
 ## License
 

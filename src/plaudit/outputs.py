@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .config import secret
 from .http import get_json, post_json
-from .models import Transcript
+from .models import Transcript, _ts
 
 log = logging.getLogger(__name__)
 NOTION = "https://api.notion.com/v1"
@@ -71,16 +71,21 @@ class NotionOutput:
         page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id},
                                               "properties": self._props(meta, "done"),  # meta["status"] is the job state (waiting), not the column
                                               "children": children[:100]}, self.headers)
+        url = page.get("url", page["id"])
         # Transcript goes in a toggle; Notion caps 100 blocks per call and 2000 chars per rich text.
-        toggle = post_json(f"{NOTION}/blocks/{page['id']}/children",
-                           {"children": [{"object": "block", "type": "toggle",
-                                          "toggle": {"rich_text": [{"text": {"content": "Transcript"}}]}}]},
-                           self.headers, method="PATCH")  # Notion appends children with PATCH
-        toggle_id = toggle["results"][0]["id"]
-        lines = [_para(f"[{_ts(s.start)}] {s.speaker}: {s.text}"[:2000]) for s in transcript.segments if s.text]
-        for i in range(0, len(lines), 100):
-            post_json(f"{NOTION}/blocks/{toggle_id}/children", {"children": lines[i:i + 100]}, self.headers, method="PATCH")
-        return page.get("url", page["id"])
+        # The page exists now: a failure below is logged, not raised, so a retry cannot create a duplicate page.
+        try:
+            toggle = post_json(f"{NOTION}/blocks/{page['id']}/children",
+                               {"children": [{"object": "block", "type": "toggle",
+                                              "toggle": {"rich_text": [{"text": {"content": "Transcript"}}]}}]},
+                               self.headers, method="PATCH")  # Notion appends children with PATCH
+            toggle_id = toggle["results"][0]["id"]
+            lines = [_para(f"[{_ts(s.start)}] {s.speaker}: {s.text}"[:2000]) for s in transcript.segments if s.text]
+            for i in range(0, len(lines), 100):
+                post_json(f"{NOTION}/blocks/{toggle_id}/children", {"children": lines[i:i + 100]}, self.headers, method="PATCH")
+        except Exception:
+            log.exception("page %s created but the transcript could not be appended", url)
+        return url
 
     def publish_stuck(self, meta: dict, error: str) -> str:
         """A stub page so a job that has failed for 24 h is visible where the meetings are."""
@@ -107,12 +112,6 @@ def create_notion_database(token: str, parent_page_id: str, title: str = "Meetin
     return db["id"]
 
 
-def _ts(seconds: float) -> str:
-    m, s = divmod(int(seconds), 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-
 def _para(text: str, link: str | None = None) -> dict:
     rt = {"text": {"content": text}}
     if link:
@@ -124,7 +123,7 @@ def md_to_blocks(md: str) -> list[dict]:
     """Minimal Markdown to Notion blocks: ##/### headings, - bullets, 1. numbered, paragraphs."""
     blocks = []
     for line in md.splitlines():
-        s = line.strip()
+        s = line.strip()[:2000]  # Notion rejects any rich text over 2000 chars
         if not s:
             continue
         if s.startswith("### "):
@@ -136,7 +135,7 @@ def md_to_blocks(md: str) -> list[dict]:
         elif s[0].isdigit() and ". " in s[:4]:
             blocks.append({"object": "block", "type": "numbered_list_item", "numbered_list_item": {"rich_text": [{"text": {"content": s.split(". ", 1)[1]}}]}})
         else:
-            blocks.append(_para(s[:2000]))
+            blocks.append(_para(s))
     return blocks
 
 

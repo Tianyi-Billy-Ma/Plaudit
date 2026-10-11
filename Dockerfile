@@ -5,7 +5,7 @@ FROM ${BASE}
 ARG EXTRAS=gpu
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg rclone curl ca-certificates \
-    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs \
+    && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs \
     && npm install -g @plaud-ai/cli@0.3.15 && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
