@@ -82,3 +82,11 @@ def test_retire_backs_up_then_deletes_after_retention(cfg, tmp_path, monkeypatch
     q.retire()
     c = {j["id"]: j for j in q.jobs()}["c"]
     assert c["status"] == "done" and "backup" not in c and (q.done_dir / "c").exists()  # never delete without a backup
+
+
+def test_corrupt_job_file_is_skipped_and_save_is_atomic(cfg, tmp_path):
+    q = Queue(cfg)
+    (q.jobs_dir / "bad.json").write_text('{"id": "trunc')
+    q.save({"id": "good", "status": "waiting"})
+    assert [j["id"] for j in q.jobs()] == ["good"]
+    assert not list(q.jobs_dir.glob("*.tmp"))

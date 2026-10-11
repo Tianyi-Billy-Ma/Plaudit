@@ -35,10 +35,18 @@ class Queue:
             d.mkdir(parents=True, exist_ok=True)
 
     def save(self, job: dict) -> None:
-        (self.jobs_dir / f"{job['id']}.json").write_text(json.dumps(job, ensure_ascii=False, indent=1))
+        tmp = self.jobs_dir / f"{job['id']}.json.tmp"
+        tmp.write_text(json.dumps(job, ensure_ascii=False, indent=1))
+        tmp.replace(self.jobs_dir / f"{job['id']}.json")  # atomic: a kill mid-write never leaves a half file
 
     def jobs(self) -> list[dict]:
-        return sorted((json.loads(p.read_text()) for p in self.jobs_dir.glob("*.json")), key=lambda j: j["id"])
+        out = []
+        for p in self.jobs_dir.glob("*.json"):
+            try:
+                out.append(json.loads(p.read_text()))
+            except ValueError:
+                log.error("skipping unreadable job file %s", p)
+        return sorted(out, key=lambda j: j["id"])
 
     def pull(self) -> int:
         n = 0
@@ -72,7 +80,7 @@ class Queue:
                 if job["status"] not in ("waiting",):
                     continue
                 free = mem_available_gb()
-                if free < self.cfg["min_free_mem_gb"]:
+                if pipeline is None and free < self.cfg["min_free_mem_gb"]:  # once loaded, the models are the usage
                     log.warning("only %.1f GB free, below min_free_mem_gb; jobs stay queued", free)
                     break
                 pipeline = pipeline or Pipeline(self.cfg)

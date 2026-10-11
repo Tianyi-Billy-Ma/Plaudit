@@ -50,10 +50,10 @@ class FolderSource:
                 continue
             if time.time() - f.stat().st_mtime < 10:  # still being written
                 continue
-            when = datetime.fromtimestamp(f.stat().st_mtime).isoformat()
+            when = datetime.fromtimestamp(f.stat().st_mtime).astimezone().isoformat()  # local, not UTC like Plaud
             dest = self.inbox / f"{int(time.time())}-{f.name}"
             shutil.move(str(f), dest)
-            yield new_job(self.inbox, dest, f.stem, "folder", when=when)
+            yield new_job(self.inbox, dest, f.stem, "folder", source_id=dest.name, when=when)
 
 
 class PlaudSource:

@@ -27,6 +27,8 @@ class MarkdownOutput:
     def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None) -> str:
         self.dir.mkdir(parents=True, exist_ok=True)
         path = self.dir / f"{meta['date']} {safe(meta['title'])}.md"
+        if path.exists():  # second meeting with the same title that day
+            path = path.with_stem(f"{path.stem} {meta['id']}")
         path.write_text(render_markdown(meta, summary, transcript, audio_link))
         return str(path)
 
@@ -68,9 +70,9 @@ class NotionOutput:
         children = md_to_blocks(summary)
         if audio_link:
             children.append(_para(f"Audio: {audio_link}", link=audio_link))
-        page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id},
+        page = post_json(f"{NOTION}/pages", retries=1, payload={"parent": {"database_id": self.database_id},
                                               "properties": self._props(meta, "done"),  # meta["status"] is the job state (waiting), not the column
-                                              "children": children[:100]}, self.headers)
+                                              "children": children[:100]}, headers=self.headers)
         url = page.get("url", page["id"])
         # Transcript goes in a toggle; Notion caps 100 blocks per call and 2000 chars per rich text.
         # The page exists now: a failure below is logged, not raised, so a retry cannot create a duplicate page.
@@ -89,10 +91,10 @@ class NotionOutput:
 
     def publish_stuck(self, meta: dict, error: str) -> str:
         """A stub page so a job that has failed for 24 h is visible where the meetings are."""
-        page = post_json(f"{NOTION}/pages", {"parent": {"database_id": self.database_id},
+        page = post_json(f"{NOTION}/pages", retries=1, payload={"parent": {"database_id": self.database_id},
                                               "properties": self._props(meta, "stuck"),
                                               "children": [_para(f"Plaudit could not process this recording: {error}"[:2000])]},
-                         self.headers)
+                         headers=self.headers)
         return page.get("url", page["id"])
 
 
