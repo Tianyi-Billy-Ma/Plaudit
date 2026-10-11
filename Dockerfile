@@ -13,7 +13,7 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-cache-dir ".${EXTRAS:+[$EXTRAS]}"
 
-ENV PLAUDIT_CONFIG=/plaudit/plaudit.yaml HF_HOME=/plaudit/hf
-VOLUME ["/plaudit", "/root/.plaud", "/root/.config/rclone"]
+ENV PLAUDIT_CONFIG=/plaudit/plaudit.yaml
+VOLUME ["/plaudit", "/root/.plaud", "/root/.config/rclone", "/root/.cache/huggingface"]
 ENTRYPOINT ["plaudit"]
 CMD ["run"]

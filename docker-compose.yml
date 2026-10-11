@@ -8,9 +8,10 @@ services:
       - PLAUDIT_SUMMARY_API_KEY
       - NOTION_TOKEN
     volumes:
-      - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/, hf/ model cache
+      - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/
+      - ${HOME}/.cache/huggingface:/root/.cache/huggingface   # shared Hugging Face model cache
       - ${HOME}/.plaud:/root/.plaud            # Plaud CLI login
-      - ${HOME}/.config/rclone:/root/.config/rclone
+      - ${HOME}/.config/rclone:/root/.config/rclone:ro   # read-only so token refreshes do not leave a root-owned file
     mem_limit: 7g
     memswap_limit: 7g
     deploy:
