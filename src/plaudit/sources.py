@@ -71,11 +71,14 @@ class PlaudSource:
 
     def pull(self) -> Iterator[dict]:
         since = (date.today() - timedelta(days=self.lookback)).isoformat()
-        ids = parse_file_ids(self._plaud("files", "-s", "100", "--date-from", since))
-        for fid in ids:
+        # Filter on upload time, not --date-from: that uses the recorder's clock, which can be weeks off.
+        for fid in parse_file_ids(self._plaud("files", "-s", "100")):
             if fid in self.seen:
                 continue
             details = parse_details(self._plaud("file", fid))
+            if details.get("created_at", "")[:10] < since or seconds(details.get("duration", "")) < 60:
+                self._mark_seen(fid)  # too old, or a test clip; never look at it again
+                continue
             url = parse_url(self._plaud("audio", fid))
             if not url:
                 log.info("plaud %s: audio not available yet", fid)
@@ -83,10 +86,18 @@ class PlaudSource:
             ext = Path(url.split("?")[0]).suffix or ".mp3"
             dest = self.inbox / f"plaud-{fid}{ext}"
             download(url, dest)
-            self.seen.add(fid)
-            self.seen_path.write_text(json.dumps(sorted(self.seen)))
+            self._mark_seen(fid)
             yield new_job(self.inbox, dest, details.get("name") or f"Plaud {fid}", "plaud", fid,
                           details.get("start_at") or details.get("created_at"))
+
+    def _mark_seen(self, fid: str) -> None:
+        self.seen.add(fid)
+        self.seen_path.write_text(json.dumps(sorted(self.seen)))
+
+
+def seconds(duration: str) -> int:
+    """Plaud prints durations like 2s, 23m54s, 1h28m."""
+    return sum(int(n) * {"h": 3600, "m": 60, "s": 1}[u] for n, u in re.findall(r"(\d+)([hms])", duration))
 
 
 def download(url: str, dest: Path, timeout: int = 300) -> None:
