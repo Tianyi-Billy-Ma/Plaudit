@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from plaudit.diarize import merge_turns, split_turns
+from plaudit.diarize import merge_turns, split_turns, stream_chunks
 from plaudit.models import Segment
 from plaudit.outputs import md_to_blocks, safe
 from plaudit.sources import parse_details, parse_file_ids, parse_url
@@ -197,3 +197,10 @@ def test_plaud_pull_filters_on_upload_time_and_skips_test_clips(cfg, tmp_path, m
     jobs = list(src.pull())
     assert [j["source_id"] for j in jobs] == ["meeting"]
     assert src.seen == {"clip00", "old000", "meeting"}  # skipped ones are never fetched again
+
+
+def test_stream_chunks_cover_the_audio_with_overlap():
+    # first chunk 10 samples, later ones 12, cursor advances 8, later chunks start 2 samples early
+    assert stream_chunks(30, 10, 12, 8, 2) == [(0, 10, False), (6, 18, False), (14, 26, False), (22, 30, True)]
+    assert stream_chunks(10, 10, 12, 8, 2) == [(0, 10, True)]  # exactly one chunk: it is the last
+    assert stream_chunks(3, 10, 12, 8, 2) == [(0, 3, True)]

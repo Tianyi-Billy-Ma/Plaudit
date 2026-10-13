@@ -4,6 +4,8 @@ from pathlib import Path
 
 from conftest import FakeDiarizer, FakeSummarizer, FakeTranscriber
 
+import pytest
+
 from plaudit.daemon import Queue, mem_available_gb
 from plaudit.pipeline import Pipeline
 
@@ -48,6 +50,17 @@ def test_failed_job_stays_waiting(cfg, clip, tmp_path):
 
     q.process(job, Pipeline(cfg, diarizer=Boom(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer()))
     assert job["status"] == "waiting" and job["attempts"] == 1 and "gpu on fire" in job["last_error"]
+
+
+def test_job_left_running_by_a_killed_run_counts_as_an_attempt(cfg, tmp_path, monkeypatch):
+    q = Queue(cfg)
+    (q.data / "inbox").mkdir()
+    Path(cfg["sources"]["folder"]["path"]).mkdir(exist_ok=True)
+    q.save({"id": "k", "title": "k", "status": "running", "attempts": 2})
+    monkeypatch.setattr(Queue, "process", lambda self, job, pipeline: pytest.fail("must not run a stuck job"))
+    q.run_once()
+    job = q.jobs()[0]
+    assert job["status"] == "stuck" and job["attempts"] == 3 and "died" in job["last_error"]
 
 
 def test_mem_available():
