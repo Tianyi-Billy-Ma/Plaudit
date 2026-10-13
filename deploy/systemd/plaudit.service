@@ -9,9 +9,12 @@ Description=Plaudit: pull new recordings and process the queue once
 Type=oneshot
 TimeoutStartSec=3h
 WorkingDirectory=%h/plaudit
-ExecStart=/bin/bash -c '. %h/.config/secrets.env && exec %h/.local/bin/op run --environment "$$OP_ENVIRONMENT_ID" --no-masking -- \
-  /usr/bin/docker run --rm --gpus all --memory=7g --memory-swap=7g \
-  -e PLAUDIT_SUMMARY_API_KEY -e NOTION_TOKEN \
+# 1Password rate-limits Environment reads (hit after a day of one call per 5 min), so secrets are fetched only
+# when a job actually waits; pulling from Plaud and backing up need none.
+ExecStart=/bin/bash -c 'D="/usr/bin/docker run --rm --gpus all --memory=7g --memory-swap=7g \
   -v %h/plaudit:/plaudit -v %h/.plaud:/root/.plaud -v %h/.config/rclone:/root/.config/rclone:ro \
-  -v %h/.cache/huggingface:/root/.cache/huggingface -v /etc/localtime:/etc/localtime:ro \
-  plaudit:0.1.0 run'
+  -v %h/.cache/huggingface:/root/.cache/huggingface -v /etc/localtime:/etc/localtime:ro"; \
+  $$D plaudit:0.1.0 pull && if $$D plaudit:0.1.0 status | grep -q "  waiting "; then \
+    . %h/.config/secrets.env && exec %h/.local/bin/op run --environment "$$OP_ENVIRONMENT_ID" --no-masking -- \
+      $$D -e PLAUDIT_SUMMARY_API_KEY -e NOTION_TOKEN plaudit:0.1.0 run; \
+  else exec $$D plaudit:0.1.0 run; fi'

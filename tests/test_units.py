@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from plaudit.diarize import merge_turns, split_turns
+from plaudit.diarize import merge_turns, split_turns, stream_chunks
 from plaudit.models import Segment
 from plaudit.outputs import md_to_blocks, safe
 from plaudit.sources import parse_details, parse_file_ids, parse_url
@@ -169,3 +169,38 @@ def test_config_allows_notion_only(tmp_path):
     p = tmp_path / "c.yaml"
     p.write_text("outputs:\n  markdown: null\n  notion:\n    database_id: abc\n")
     assert config.load(p)["outputs"]["markdown"] is None
+
+
+def test_plaud_pull_filters_on_upload_time_and_skips_test_clips(cfg, tmp_path, monkeypatch):
+    from datetime import date
+
+    from plaudit import sources
+    from plaudit.sources import PlaudSource, seconds
+
+    assert (seconds("2s"), seconds("23m54s"), seconds("1h28m")) == (2, 1434, 5280)
+    today = date.today().isoformat()
+    files = {"clip00": f"  name: t\n  created_at: {today}T19:23:56\n  start_at: 2026-09-16T18:07:01\n  duration: 2s\n",
+             "old000": "  name: o\n  created_at: 2026-06-29T10:00:00\n  start_at: 2026-06-29T09:00:00\n  duration: 1h01m\n",
+             "meeting": f"  name: m\n  created_at: {today}T01:00:00\n  start_at: 2026-09-17T00:00:00\n  duration: 23m54s\n"}
+
+    def fake_plaud(self, cmd, *args):
+        if cmd == "files":
+            return "  ID  NAME\n" + "".join(f"  {k}  x\n" for k in files)
+        if cmd == "file":
+            return files[args[0]]
+        return "https://x.plaud.ai/a.mp3"
+
+    monkeypatch.setattr(PlaudSource, "_plaud", fake_plaud)
+    monkeypatch.setattr(sources, "download", lambda url, dest: Path(dest).write_bytes(b"x"))
+    (tmp_path / "inbox").mkdir(exist_ok=True)
+    src = PlaudSource(cfg, tmp_path / "inbox", tmp_path)
+    jobs = list(src.pull())
+    assert [j["source_id"] for j in jobs] == ["meeting"]
+    assert src.seen == {"clip00", "old000", "meeting"}  # skipped ones are never fetched again
+
+
+def test_stream_chunks_cover_the_audio_with_overlap():
+    # first chunk 10 samples, later ones 12, cursor advances 8, later chunks start 2 samples early
+    assert stream_chunks(30, 10, 12, 8, 2) == [(0, 10, False), (6, 18, False), (14, 26, False), (22, 30, True)]
+    assert stream_chunks(10, 10, 12, 8, 2) == [(0, 10, True)]  # exactly one chunk: it is the last
+    assert stream_chunks(3, 10, 12, 8, 2) == [(0, 3, True)]

@@ -77,6 +77,11 @@ class Queue:
                 return
             log.info("pulled %d new recording(s)", self.pull())
             for job in self.jobs():
+                if job["status"] == "running":  # the previous run died mid-job (OOM kill, reboot): count it
+                    job["attempts"] += 1
+                    job["last_error"] = "run died mid-job (killed or out of memory)"
+                    job["status"] = "stuck" if job["attempts"] >= 3 else "waiting"
+                    self.save(job)
                 if job["status"] not in ("waiting",):
                     continue
                 free = mem_available_gb()
@@ -89,6 +94,8 @@ class Queue:
 
     def process(self, job: dict, pipeline: Pipeline) -> None:
         workdir = self.done_dir / job["id"]
+        job["status"] = "running"
+        self.save(job)
         try:
             result = pipeline.process(Path(job["audio"]), job, workdir)
             shutil.move(job["audio"], workdir / Path(job["audio"]).name)
@@ -96,6 +103,7 @@ class Queue:
                        duration_min=result["meta"]["duration_min"])
             log.info("%s done: %s", job["title"], result["links"])  # backup happens in retire(), same run
         except Exception as e:
+            job["status"] = "waiting"
             job["attempts"] += 1
             job["last_error"] = f"{type(e).__name__}: {e}"[:500]
             job.setdefault("first_failure", datetime.now().isoformat(timespec="seconds"))
