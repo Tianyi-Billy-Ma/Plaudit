@@ -231,3 +231,36 @@ def test_failed_job_backs_off_before_retrying(cfg, clip):
     assert datetime.fromisoformat(job["not_before"]) - datetime.now() <= timedelta(hours=2)
     job["not_before"] = "2000-01-01T00:00:00"
     assert due(job)
+
+
+def test_long_transcripts_merge_in_rounds_no_call_over_chunk_size(cfg):
+    from plaudit.summarize import Summarizer
+
+    cfg["summary"].update(base_url="http://x", chunk_chars=300, language="en")
+    s = Summarizer(cfg)
+    calls = []
+
+    def fake_chat(system, user):
+        calls.append(len(user))
+        return "## Summary\n- part %d\n" % len(calls)
+
+    s._chat = fake_chat
+    out = s.summarize("".join("line %03d " % i + "x" * 40 + "\n" for i in range(60)))
+    assert out.startswith("## Summary") and len(calls) > 2
+    assert max(calls) <= 300 + len("Below are minutes for consecutive parts of one meeting. Merge them into one set of minutes with the same three sections, removing duplicates.") + 2
+
+
+def test_retry_reuses_saved_transcript(cfg, clip, tmp_path):
+    from conftest import FakeSummarizer, FakeTranscriber
+
+    from plaudit.pipeline import Pipeline
+
+    class Boom:
+        def diarize(self, wav):
+            raise AssertionError("diarizer must not run again")
+
+    workdir = tmp_path / "w"
+    workdir.mkdir()
+    (workdir / "transcript.json").write_text('{"segments": [{"start": 0, "end": 1, "speaker": "S1", "text": "hi"}], "language": "en"}')
+    r = Pipeline(cfg, diarizer=Boom(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(), sinks=[]).process(clip, {"title": "t", "date": "2026-10-14", "source": "manual"}, workdir)
+    assert r["transcript"].as_text() == "[00:00:00] S1: hi"

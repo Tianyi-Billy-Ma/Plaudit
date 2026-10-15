@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 from . import audio, config, diarize, outputs, transcribe
-from .models import Transcript
+from .models import Segment, Transcript
 from .summarize import Summarizer
 
 log = logging.getLogger(__name__)
@@ -26,10 +26,16 @@ class Pipeline:
         workdir.mkdir(parents=True, exist_ok=True)
         wav = audio.to_wav16k(src, workdir / "audio16k.wav")
         meta = {**meta, "duration_min": round(audio.duration_seconds(wav) / 60, 1)}
-        turns = self.diarizer.diarize(wav)
-        log.info("%s: %d speaker turns", meta["title"], len(turns))
-        transcript = Transcript(self.transcriber.transcribe(wav, turns), self.cfg["language"])
-        (workdir / "transcript.json").write_text(json.dumps(transcript.to_dict(), ensure_ascii=False, indent=1))
+        saved = workdir / "transcript.json"
+        if saved.exists():  # a retry after the summary or an output failed: 20+ min of diarization and ASR are done
+            log.info("%s: reusing %s", meta["title"], saved)
+            d = json.loads(saved.read_text())
+            transcript = Transcript([Segment(**x) for x in d["segments"]], d["language"])
+        else:
+            turns = self.diarizer.diarize(wav)
+            log.info("%s: %d speaker turns", meta["title"], len(turns))
+            transcript = Transcript(self.transcriber.transcribe(wav, turns), self.cfg["language"])
+            saved.write_text(json.dumps(transcript.to_dict(), ensure_ascii=False, indent=1))
         summary = self.summarizer.summarize(transcript.as_text(), config.glossary(self.cfg)) if self.summarizer else ""
         (workdir / "notes.md").write_text(outputs.render_markdown(meta, summary, transcript, audio_link))
         links = [sink.publish(meta, summary, transcript, audio_link) for sink in self.sinks]
