@@ -1,8 +1,12 @@
 """Meeting summary through any OpenAI-compatible chat endpoint. Long transcripts: chunk, then merge."""
 from __future__ import annotations
 
+import logging
+
 from .config import secret
 from .http import post_json
+
+log = logging.getLogger(__name__)
 
 PROMPTS = {
     "zh": (
@@ -50,13 +54,18 @@ class Summarizer:
         system = PROMPTS[self.lang]
         if glossary:
             system += "\n术语表 / Glossary: " + ", ".join(glossary)
-        summaries = [self._chat(system, p) for p in chunk(transcript_text, self.chunk_chars)]
+        parts = chunk(transcript_text, self.chunk_chars)
+        summaries = []
+        for i, p in enumerate(parts, 1):
+            log.info("summary: part %d/%d (%d chars)", i, len(parts), len(p))
+            summaries.append(self._chat(system, p))
         # Merge in rounds of at most chunk_chars each: reasoning models think longer than their token budget on
         # big prompts (GLM hit finish_reason=length with no answer on 12k chars), so no call may exceed one chunk.
         while len(summaries) > 1:
             groups = chunk("\n\n---\n\n".join(summaries), self.chunk_chars)
             if len(groups) >= len(summaries):  # summaries themselves too big to group; one final call, as before
                 groups = ["\n\n---\n\n".join(summaries)]
+            log.info("summary: merging %d parts in %d call(s)", len(summaries), len(groups))
             summaries = [self._chat(system, MERGE[self.lang] + "\n\n" + g) for g in groups]
         return summaries[0]
 
