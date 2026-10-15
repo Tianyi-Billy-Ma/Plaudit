@@ -1,3 +1,4 @@
+import pytest
 from pathlib import Path
 
 from plaudit.diarize import merge_turns, split_turns, stream_chunks
@@ -264,3 +265,25 @@ def test_retry_reuses_saved_transcript(cfg, clip, tmp_path):
     (workdir / "transcript.json").write_text('{"segments": [{"start": 0, "end": 1, "speaker": "S1", "text": "hi"}], "language": "en"}')
     r = Pipeline(cfg, diarizer=Boom(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(), sinks=[]).process(clip, {"title": "t", "date": "2026-10-14", "source": "manual"}, workdir)
     assert r["transcript"].as_text() == "[00:00:00] S1: hi"
+
+
+def test_empty_answer_retries_as_halves(cfg):
+    from plaudit.summarize import EmptySummary, Summarizer
+
+    cfg["summary"].update(base_url="http://x", chunk_chars=5000, language="en")
+    s = Summarizer(cfg)
+    calls = []
+
+    def fake_chat(system, user):
+        calls.append(len(user))
+        if len(user) > 1500:
+            raise EmptySummary("length")
+        return "## Summary\n- ok\n"
+
+    s._chat = fake_chat
+    text = "".join("line %03d " % i + "x" * 40 + "\n" for i in range(80))  # ~4000 chars, one chunk
+    assert s.summarize(text).startswith("## Summary")
+    assert calls[0] > 1500 and len(calls) >= 5  # whole, two halves (one more split), merges
+    with pytest.raises(EmptySummary):
+        s._chat = lambda system, user: (_ for _ in ()).throw(EmptySummary("length"))
+        s.summarize(text)
