@@ -289,6 +289,14 @@ def test_empty_answer_retries_as_halves(cfg):
         s._chat = lambda system, user: (_ for _ in ()).throw(EmptySummary("length"))
         s.summarize(text)
 
+    def merge_fails(system, user):  # halves answer, every merge comes back empty: keep the halves
+        if user.startswith(s.merge_prompt) or len(user) > 1500:
+            raise EmptySummary("length")
+        return "## Summary\n- %d\n" % len(user)
+
+    s._chat = merge_fails
+    assert s.summarize(text).count("## Summary") >= 2
+
 
 def test_summary_answers_are_cached_on_disk(cfg, tmp_path):
     from plaudit.summarize import Summarizer
