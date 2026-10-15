@@ -11,7 +11,7 @@ TimeoutStartSec=3h
 WorkingDirectory=%h/plaudit
 EnvironmentFile=%h/.config/secrets.env
 ExecStart=/usr/bin/docker run --rm --gpus all --memory=7g --memory-swap=7g \
-  -e PLAUDIT_SUMMARY_API_KEY -e NOTION_TOKEN \
+  -e OPENAI_API_KEY -e NOTION_TOKEN \
   -v %h/plaudit:/plaudit -v %h/.plaud:/root/.plaud -v %h/.config/rclone:/root/.config/rclone:ro \
   -v %h/.cache/huggingface:/root/.cache/huggingface -v /etc/localtime:/etc/localtime:ro \
   plaudit:0.1.0 run

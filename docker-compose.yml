@@ -5,7 +5,7 @@ services:
     build: .
     image: plaudit:0.1.0
     environment:
-      - PLAUDIT_SUMMARY_API_KEY
+      - OPENAI_API_KEY
       - NOTION_TOKEN
     volumes:
       - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/

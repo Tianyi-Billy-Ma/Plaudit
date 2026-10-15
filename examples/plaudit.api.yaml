@@ -18,7 +18,7 @@ transcription:
 summary:
   base_url: http://localhost:11434/v1  # e.g. Ollama
   model: qwen3:8b
-  api_key_env: PLAUDIT_SUMMARY_API_KEY
+  api_key_env: OPENAI_API_KEY
   language: en
 
 outputs:

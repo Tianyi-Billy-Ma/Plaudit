@@ -18,7 +18,7 @@ Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (
 
 | Variable | Used for |
 | --- | --- |
-| `PLAUDIT_SUMMARY_API_KEY` | the chat endpoint that writes the summary (name is configurable) |
+| `OPENAI_API_KEY` | the chat endpoint that writes the summary (name is configurable) |
 | `NOTION_TOKEN` | Notion internal integration, if the Notion output is on |
 | `PLAUDIT_ASR_API_KEY` | the `/v1/audio/transcriptions` endpoint, API mode only |
 
