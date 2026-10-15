@@ -1,7 +1,10 @@
 """Meeting summary through any OpenAI-compatible chat endpoint. Long transcripts: chunk, then merge."""
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
+from pathlib import Path
 
 from .config import secret
 from .http import post_json
@@ -39,11 +42,23 @@ class Summarizer:
         self.model = sc["model"]
         self.lang = sc["language"]
         self.chunk_chars = sc["chunk_chars"]
+        self.cache, self.cache_file = {}, None
         self.headers = {}
         if key := secret(sc.get("api_key_env")):
             self.headers["Authorization"] = f"Bearer {key}"
 
     def _chat(self, system: str, user: str) -> str:
+        # Every answer is cached on disk per prompt: a 2 h recording is ~40 calls over 2.5 h, and one cut
+        # connection must not throw them all away.
+        key = hashlib.sha256((self.model + system + user).encode()).hexdigest()[:16]
+        if key in self.cache:
+            return self.cache[key]
+        self.cache[key] = out = self._chat_uncached(system, user)
+        if self.cache_file:
+            self.cache_file.write_text(json.dumps(self.cache, ensure_ascii=False))
+        return out
+
+    def _chat_uncached(self, system: str, user: str) -> str:
         resp = post_json(self.url, {
             "model": self.model, "temperature": 0.2,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
@@ -67,7 +82,9 @@ class Summarizer:
             subs = [self._chat_or_split(system, h, prefix) for h in halves]
             return self._chat(system, MERGE[self.lang] + "\n\n" + "\n\n---\n\n".join(subs))
 
-    def summarize(self, transcript_text: str, glossary: list[str] = ()) -> str:
+    def summarize(self, transcript_text: str, glossary: list[str] = (), cache_file: Path | None = None) -> str:
+        self.cache_file = cache_file
+        self.cache = json.loads(cache_file.read_text()) if cache_file and cache_file.exists() else {}
         system = PROMPTS[self.lang]
         if glossary:
             system += "\n术语表 / Glossary: " + ", ".join(glossary)

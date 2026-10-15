@@ -39,7 +39,7 @@ class FakeTranscriber:
 
 
 class FakeSummarizer:
-    def summarize(self, text, glossary=()):
+    def summarize(self, text, glossary=(), cache_file=None):
         return "## 摘要\n- two turns\n## 决定\n无\n## 行动项\n- nobody: nothing"
 
 
