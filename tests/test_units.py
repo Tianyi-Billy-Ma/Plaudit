@@ -248,7 +248,8 @@ def test_long_transcripts_merge_in_rounds_no_call_over_chunk_size(cfg):
     s._chat = fake_chat
     out = s.summarize("".join("line %03d " % i + "x" * 40 + "\n" for i in range(60)))
     assert out.startswith("## Summary") and len(calls) > 2
-    assert max(calls) <= 300 + len("Below are minutes for consecutive parts of one meeting. Merge them into one set of minutes with the same three sections, removing duplicates.") + 2
+    assert max(calls) <= 300 + len(s.merge_prompt)
+    assert "at most 100 characters" in s.merge_prompt
 
 
 def test_retry_reuses_saved_transcript(cfg, clip, tmp_path):
