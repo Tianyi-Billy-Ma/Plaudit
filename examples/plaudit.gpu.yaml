@@ -22,7 +22,7 @@ transcription:
 summary:
   base_url: http://localhost:8000/v1    # any OpenAI-compatible server (CPA, vLLM, Ollama, OpenAI)
   model: glm-5.3-flash
-  api_key_env: PLAUDIT_SUMMARY_API_KEY
+  api_key_env: OPENAI_API_KEY
   language: zh             # zh: 摘要/决定/行动项 with English terms kept; en: Summary/Decisions/Action items
   chunk_chars: 12000
 

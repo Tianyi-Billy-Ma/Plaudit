@@ -19,7 +19,7 @@ DEFAULTS: dict = {
     "summary": {
         "base_url": None,
         "model": "glm-5.3-flash",
-        "api_key_env": "PLAUDIT_SUMMARY_API_KEY",
+        "api_key_env": "OPENAI_API_KEY",
         "language": "zh",
         "chunk_chars": 12000,
     },
