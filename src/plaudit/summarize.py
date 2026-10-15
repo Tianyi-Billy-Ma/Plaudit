@@ -80,7 +80,11 @@ class Summarizer:
                 raise
             log.warning("summary: no answer for %d chars, retrying as two halves", len(text))
             subs = [self._chat_or_split(system, h, prefix) for h in halves]
-            return self._chat(system, self.merge_prompt + "\n\n---\n\n".join(subs))
+            try:
+                return self._chat(system, self.merge_prompt + "\n\n---\n\n".join(subs))
+            except EmptySummary:  # the halves' answers are still minutes; a later merge round may shrink them
+                log.warning("summary: no answer merging %d halves, keeping them unmerged", len(subs))
+                return "\n\n".join(subs)
 
     @property
     def merge_prompt(self) -> str:
