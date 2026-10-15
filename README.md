@@ -14,7 +14,7 @@ pip install "plaudit[gpu]"     # adds transformers and torch for local models (Q
 sudo apt install ffmpeg        # plus rclone if you want backups, Node 22+ and `npm i -g @plaud-ai/cli` for Plaud
 ```
 
-Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are not in the config file; they are environment variables, read from `~/.config/plaudit.env` (`KEY=value` lines, `chmod 600`) by the systemd unit, or exported by you before `plaudit run`. The variable names are configurable (`api_key_env` / `token_env`).
+Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Secrets are not in the config file; they are environment variables, read from `~/.config/secrets.env` (`KEY=value` lines, `chmod 600`) by the systemd unit, or exported by you before `plaudit run`. The variable names are configurable (`api_key_env` / `token_env`).
 
 | Variable | Used for |
 | --- | --- |
