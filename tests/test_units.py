@@ -317,3 +317,15 @@ def test_summary_answers_are_cached_on_disk(cfg, tmp_path):
     s2 = Summarizer(cfg)
     s2._chat_uncached = lambda system, user: (_ for _ in ()).throw(AssertionError("must hit cache"))
     assert s2.summarize(text, cache_file=tmp_path / "c.json") == first
+
+
+def test_cut_off_reply_counts_as_empty_answer(cfg, monkeypatch):
+    import http.client
+
+    from plaudit import summarize
+    from plaudit.summarize import EmptySummary, Summarizer
+
+    cfg["summary"].update(base_url="http://x", language="en")
+    monkeypatch.setattr(summarize, "post_json", lambda *a, **k: (_ for _ in ()).throw(http.client.IncompleteRead(b"")))
+    with pytest.raises(EmptySummary):
+        Summarizer(cfg)._chat_uncached("s", "u")

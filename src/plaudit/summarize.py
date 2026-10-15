@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import logging
 from pathlib import Path
@@ -59,10 +60,14 @@ class Summarizer:
         return out
 
     def _chat_uncached(self, system: str, user: str) -> str:
-        resp = post_json(self.url, {
-            "model": self.model, "temperature": 0.2,
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        }, self.headers)
+        try:
+            resp = post_json(self.url, {
+                "model": self.model, "temperature": 0.2,
+                "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+            }, self.headers, retries=1)
+        except http.client.IncompleteRead as e:
+            # a proxy cuts replies after ~10 min, which is how long GLM thinks before giving up: same cure as empty
+            raise EmptySummary(f"reply from {self.model} cut off ({e})") from None
         msg = resp["choices"][0]["message"]
         # reasoning models (GLM) put thinking in reasoning_content; content is null when the budget ran out
         if not msg.get("content"):
