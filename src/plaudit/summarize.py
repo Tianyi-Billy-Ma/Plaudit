@@ -28,6 +28,10 @@ MERGE = {
 }
 
 
+class EmptySummary(RuntimeError):
+    """The model returned no content (a reasoning model spent its whole budget thinking)."""
+
+
 class Summarizer:
     def __init__(self, cfg: dict):
         sc = cfg["summary"]
@@ -47,8 +51,21 @@ class Summarizer:
         msg = resp["choices"][0]["message"]
         # reasoning models (GLM) put thinking in reasoning_content; content is null when the budget ran out
         if not msg.get("content"):
-            raise RuntimeError(f"empty summary from {self.model} (finish_reason={resp['choices'][0].get('finish_reason')})")
+            raise EmptySummary(f"empty summary from {self.model} (finish_reason={resp['choices'][0].get('finish_reason')})")
         return msg["content"].strip()
+
+    def _chat_or_split(self, system: str, text: str, prefix: str = "") -> str:
+        """One call; if the model returns nothing, halve the text and merge the two answers (thinking length
+        grows much faster than the prompt, so halves succeed where the whole did not)."""
+        try:
+            return self._chat(system, prefix + text)
+        except EmptySummary:
+            halves = chunk(text, len(text) // 2 + 1)
+            if len(text) < 1000 or len(halves) < 2:
+                raise
+            log.warning("summary: no answer for %d chars, retrying as two halves", len(text))
+            subs = [self._chat_or_split(system, h, prefix) for h in halves]
+            return self._chat(system, MERGE[self.lang] + "\n\n" + "\n\n---\n\n".join(subs))
 
     def summarize(self, transcript_text: str, glossary: list[str] = ()) -> str:
         system = PROMPTS[self.lang]
@@ -58,7 +75,7 @@ class Summarizer:
         summaries = []
         for i, p in enumerate(parts, 1):
             log.info("summary: part %d/%d (%d chars)", i, len(parts), len(p))
-            summaries.append(self._chat(system, p))
+            summaries.append(self._chat_or_split(system, p))
         # Merge in rounds of at most chunk_chars each: reasoning models think longer than their token budget on
         # big prompts (GLM hit finish_reason=length with no answer on 12k chars), so no call may exceed one chunk.
         while len(summaries) > 1:
@@ -66,7 +83,7 @@ class Summarizer:
             if len(groups) >= len(summaries):  # summaries themselves too big to group; one final call, as before
                 groups = ["\n\n---\n\n".join(summaries)]
             log.info("summary: merging %d parts in %d call(s)", len(summaries), len(groups))
-            summaries = [self._chat(system, MERGE[self.lang] + "\n\n" + g) for g in groups]
+            summaries = [self._chat_or_split(system, g, MERGE[self.lang] + "\n\n") for g in groups]
         return summaries[0]
 
 
