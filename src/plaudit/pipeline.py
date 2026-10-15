@@ -36,7 +36,8 @@ class Pipeline:
             log.info("%s: %d speaker turns", meta["title"], len(turns))
             transcript = Transcript(self.transcriber.transcribe(wav, turns), self.cfg["language"])
             saved.write_text(json.dumps(transcript.to_dict(), ensure_ascii=False, indent=1))
-        summary = self.summarizer.summarize(transcript.as_text(), config.glossary(self.cfg)) if self.summarizer else ""
+        summary = (self.summarizer.summarize(transcript.as_text(), config.glossary(self.cfg), workdir / "summary-cache.json")
+                   if self.summarizer else "")
         (workdir / "notes.md").write_text(outputs.render_markdown(meta, summary, transcript, audio_link))
         links = [sink.publish(meta, summary, transcript, audio_link) for sink in self.sinks]
         wav.unlink()

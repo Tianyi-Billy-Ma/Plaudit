@@ -1,6 +1,7 @@
 """Tiny JSON HTTP client (stdlib only) for the OpenAI-compatible and Notion APIs."""
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -33,7 +34,8 @@ def post_json(url: str, payload: dict, headers: dict | None = None, timeout: int
                 time.sleep(2 ** attempt)
                 continue
             raise HttpError(e.code, body) from None
-        except (urllib.error.URLError, TimeoutError):
+        except (urllib.error.URLError, TimeoutError, http.client.HTTPException, ConnectionError):
+            # HTTPException covers IncompleteRead/RemoteDisconnected: a proxy cut a long (10 min) chunked reply
             if attempt < retries - 1:
                 time.sleep(2 ** attempt)
                 continue

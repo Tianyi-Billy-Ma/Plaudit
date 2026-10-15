@@ -287,3 +287,24 @@ def test_empty_answer_retries_as_halves(cfg):
     with pytest.raises(EmptySummary):
         s._chat = lambda system, user: (_ for _ in ()).throw(EmptySummary("length"))
         s.summarize(text)
+
+
+def test_summary_answers_are_cached_on_disk(cfg, tmp_path):
+    from plaudit.summarize import Summarizer
+
+    cfg["summary"].update(base_url="http://x", chunk_chars=300, language="en")
+    s = Summarizer(cfg)
+    n = [0]
+
+    def fake(system, user):
+        n[0] += 1
+        return "## Summary\n- %d\n" % n[0]
+
+    s._chat_uncached = fake
+    text = "".join("line %02d " % i + "x" * 40 + "\n" for i in range(20))
+    first = s.summarize(text, cache_file=tmp_path / "c.json")
+    calls = n[0]
+    assert calls > 1 and (tmp_path / "c.json").exists()
+    s2 = Summarizer(cfg)
+    s2._chat_uncached = lambda system, user: (_ for _ in ()).throw(AssertionError("must hit cache"))
+    assert s2.summarize(text, cache_file=tmp_path / "c.json") == first
