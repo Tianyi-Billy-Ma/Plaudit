@@ -25,6 +25,10 @@ def mem_available_gb(meminfo: str | None = None) -> float:
     return float("inf")
 
 
+def due(job: dict) -> bool:
+    return datetime.now() >= datetime.fromisoformat(job.get("not_before", "1970-01-01"))
+
+
 class Queue:
     def __init__(self, cfg: dict):
         self.cfg = cfg
@@ -82,7 +86,7 @@ class Queue:
                     job["last_error"] = "run died mid-job (killed or out of memory)"
                     job["status"] = "stuck" if job["attempts"] >= 3 else "waiting"
                     self.save(job)
-                if job["status"] not in ("waiting",):
+                if job["status"] != "waiting" or not due(job):
                     continue
                 free = mem_available_gb()
                 if pipeline is None and free < self.cfg["min_free_mem_gb"]:  # once loaded, the models are the usage
@@ -107,6 +111,9 @@ class Queue:
             job["attempts"] += 1
             job["last_error"] = f"{type(e).__name__}: {e}"[:500]
             job.setdefault("first_failure", datetime.now().isoformat(timespec="seconds"))
+            # Back off 10 min, 20, 40 ... up to 2 h: a retry every 5 min hammers CPA/Notion and the 1Password quota.
+            job["not_before"] = (datetime.now() + min(timedelta(hours=2), timedelta(minutes=10 * 2 ** (job["attempts"] - 1)))
+                                 ).isoformat(timespec="seconds")
             if datetime.now() - datetime.fromisoformat(job["first_failure"]) > STUCK_AFTER and job["status"] != "stuck":
                 job["status"] = "stuck"
                 for sink in pipeline.sinks:

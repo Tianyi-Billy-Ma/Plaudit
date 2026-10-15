@@ -8,7 +8,7 @@ from datetime import date
 from pathlib import Path
 
 from . import __version__, config
-from .daemon import Queue
+from .daemon import Queue, due
 from .pipeline import Pipeline
 
 log = logging.getLogger(__name__)
@@ -59,7 +59,8 @@ def main(argv=None) -> int:
         return 0
     if args.cmd == "status":
         for j in q.jobs():
-            print(f"{j['id']}  {j['status']:8}  {j['title']}  {j.get('last_error', '')}")
+            status = j["status"] if due(j) or j["status"] != "waiting" else "delayed"
+            print(f"{j['id']}  {status:8}  {j['title']}  {j.get('last_error', '')}")
         return 0
     src = Path(args.file)
     job = new_job(q.data / "inbox", src, args.title or src.stem, "manual", when=args.date)

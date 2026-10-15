@@ -204,3 +204,30 @@ def test_stream_chunks_cover_the_audio_with_overlap():
     assert stream_chunks(30, 10, 12, 8, 2) == [(0, 10, False), (6, 18, False), (14, 26, False), (22, 30, True)]
     assert stream_chunks(10, 10, 12, 8, 2) == [(0, 10, True)]  # exactly one chunk: it is the last
     assert stream_chunks(3, 10, 12, 8, 2) == [(0, 3, True)]
+
+
+def test_failed_job_backs_off_before_retrying(cfg, clip):
+    from datetime import datetime, timedelta
+
+    from conftest import FakeSummarizer, FakeTranscriber
+
+    from plaudit.daemon import Queue, due
+    from plaudit.pipeline import Pipeline
+    from plaudit.sources import new_job
+
+    class Boom:
+        def diarize(self, wav):
+            raise RuntimeError("down")
+
+    q = Queue(cfg)
+    job = new_job(q.data / "inbox", clip, "flaky", "manual")
+    pipe = Pipeline(cfg, diarizer=Boom(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(), sinks=[])
+    assert due(job)
+    q.process(job, pipe)
+    assert job["status"] == "waiting" and not due(job)
+    assert timedelta(minutes=9) < datetime.fromisoformat(job["not_before"]) - datetime.now() <= timedelta(minutes=10)
+    job["attempts"] = 9
+    q.process(job, pipe)
+    assert datetime.fromisoformat(job["not_before"]) - datetime.now() <= timedelta(hours=2)
+    job["not_before"] = "2000-01-01T00:00:00"
+    assert due(job)
