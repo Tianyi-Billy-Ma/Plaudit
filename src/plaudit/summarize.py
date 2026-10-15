@@ -26,8 +26,8 @@ PROMPTS = {
     ),
 }
 MERGE = {
-    "zh": "下面是同一场会议各部分的纪要。请合并为一份完整纪要，去重，保留同样的三个部分（摘要、决定、行动项）。",
-    "en": "Below are minutes for consecutive parts of one meeting. Merge them into one set of minutes with the same three sections, removing duplicates.",
+    "zh": "下面是同一场会议各部分的纪要。请合并为一份完整纪要，去重，保留同样的三个部分（摘要、决定、行动项），总长度不超过 %d 字。",
+    "en": "Below are minutes for consecutive parts of one meeting. Merge them into one set of minutes with the same three sections, removing duplicates, in at most %d characters.",
 }
 
 
@@ -80,7 +80,12 @@ class Summarizer:
                 raise
             log.warning("summary: no answer for %d chars, retrying as two halves", len(text))
             subs = [self._chat_or_split(system, h, prefix) for h in halves]
-            return self._chat(system, MERGE[self.lang] + "\n\n" + "\n\n---\n\n".join(subs))
+            return self._chat(system, self.merge_prompt + "\n\n---\n\n".join(subs))
+
+    @property
+    def merge_prompt(self) -> str:
+        # merged minutes must stay well under chunk_chars, or merge rounds never get smaller
+        return MERGE[self.lang] % (self.chunk_chars // 3) + "\n\n"
 
     def summarize(self, transcript_text: str, glossary: list[str] = (), cache_file: Path | None = None) -> str:
         self.cache_file = cache_file
@@ -100,7 +105,7 @@ class Summarizer:
             if len(groups) >= len(summaries):  # summaries themselves too big to group; one final call, as before
                 groups = ["\n\n---\n\n".join(summaries)]
             log.info("summary: merging %d parts in %d call(s)", len(summaries), len(groups))
-            summaries = [self._chat_or_split(system, g, MERGE[self.lang] + "\n\n") for g in groups]
+            summaries = [self._chat_or_split(system, g, self.merge_prompt) for g in groups]
         return summaries[0]
 
 
