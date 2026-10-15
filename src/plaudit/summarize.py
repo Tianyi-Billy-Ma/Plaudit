@@ -50,11 +50,15 @@ class Summarizer:
         system = PROMPTS[self.lang]
         if glossary:
             system += "\n术语表 / Glossary: " + ", ".join(glossary)
-        parts = chunk(transcript_text, self.chunk_chars)
-        summaries = [self._chat(system, p) for p in parts]
-        if len(summaries) == 1:
-            return summaries[0]
-        return self._chat(system, MERGE[self.lang] + "\n\n" + "\n\n---\n\n".join(summaries))
+        summaries = [self._chat(system, p) for p in chunk(transcript_text, self.chunk_chars)]
+        # Merge in rounds of at most chunk_chars each: reasoning models think longer than their token budget on
+        # big prompts (GLM hit finish_reason=length with no answer on 12k chars), so no call may exceed one chunk.
+        while len(summaries) > 1:
+            groups = chunk("\n\n---\n\n".join(summaries), self.chunk_chars)
+            if len(groups) >= len(summaries):  # summaries themselves too big to group; one final call, as before
+                groups = ["\n\n---\n\n".join(summaries)]
+            summaries = [self._chat(system, MERGE[self.lang] + "\n\n" + g) for g in groups]
+        return summaries[0]
 
 
 def chunk(text: str, max_chars: int) -> list[str]:
