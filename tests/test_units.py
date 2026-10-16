@@ -329,3 +329,16 @@ def test_cut_off_reply_counts_as_empty_answer(cfg, monkeypatch):
     monkeypatch.setattr(summarize, "post_json", lambda *a, **k: (_ for _ in ()).throw(http.client.IncompleteRead(b"")))
     with pytest.raises(EmptySummary):
         Summarizer(cfg)._chat_uncached("s", "u")
+
+
+def test_reasoning_effort_is_sent_only_when_configured(cfg, monkeypatch):
+    from plaudit import summarize
+    from plaudit.summarize import Summarizer
+
+    sent = []
+    monkeypatch.setattr(summarize, "post_json", lambda url, payload, *a, **k: sent.append(payload) or {"choices": [{"message": {"content": "ok"}}]})
+    cfg["summary"].update(base_url="http://x")
+    Summarizer(cfg)._chat_uncached("s", "u")
+    cfg["summary"]["reasoning_effort"] = "none"
+    Summarizer(cfg)._chat_uncached("s", "u")
+    assert "reasoning_effort" not in sent[0] and sent[1]["reasoning_effort"] == "none"

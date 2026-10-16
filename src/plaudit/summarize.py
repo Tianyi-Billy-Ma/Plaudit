@@ -43,6 +43,7 @@ class Summarizer:
         self.model = sc["model"]
         self.lang = sc["language"]
         self.chunk_chars = sc["chunk_chars"]
+        self.extra = {"reasoning_effort": sc["reasoning_effort"]} if sc.get("reasoning_effort") else {}
         self.cache, self.cache_file = {}, None
         self.headers = {}
         if key := secret(sc.get("api_key_env")):
@@ -64,6 +65,7 @@ class Summarizer:
             resp = post_json(self.url, {
                 "model": self.model, "temperature": 0.2,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+                **self.extra,
             }, self.headers)
         except http.client.IncompleteRead as e:
             # the proxy cuts replies after ~10 min, which is how long GLM thinks before giving up: same cure as empty
