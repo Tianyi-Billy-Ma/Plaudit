@@ -2,17 +2,18 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 import time
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from . import __version__, config
 from .daemon import Queue, due
 from .pipeline import Pipeline
+from .sources import new_job
 
 log = logging.getLogger(__name__)
-from .sources import new_job
 
 
 def main(argv=None) -> int:
@@ -63,11 +64,17 @@ def main(argv=None) -> int:
             print(f"{j['id']}  {status:8}  {j['title']}  {j.get('last_error', '')}")
         return 0
     src = Path(args.file)
-    job = new_job(q.data / "inbox", src, args.title or src.stem, "manual", when=args.date)
+    job = new_job(src, args.title or src.stem, "manual", when=args.date)
     with q.lock() as got:
         if not got:
             ap.error("another plaudit run is in progress; try again in a minute")
-        result = Pipeline(cfg).process(src, job, q.done_dir / job["id"])
+        workdir = q.done_dir / job["id"]
+        result = Pipeline(cfg).process(src, job, workdir)
+        shutil.copy(src, workdir)  # the job is saved as done, so retire() backs it up and deletes it like any other
+        job.update(status="done", links=result["links"], duration_min=result["meta"]["duration_min"],
+                   finished_at=datetime.now().isoformat(timespec="seconds"))
+        q.save(job)
+        q.retire()
     print(result["summary"] or result["transcript"].as_text())
     print("\n".join(result["links"]))
     return 0

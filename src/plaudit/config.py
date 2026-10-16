@@ -1,6 +1,8 @@
-"""plaudit.yaml loading. Secrets never live here: they come from environment variables."""
+"""plaudit.yaml loading. Secrets never live here: they come from environment variables, or from a `.env` file
+next to plaudit.yaml (KEY=value lines) for values the environment does not already set."""
 from __future__ import annotations
 
+import copy
 import os
 from pathlib import Path
 
@@ -44,13 +46,27 @@ def _merge(base: dict, override: dict) -> dict:
 def load(path: str | os.PathLike | None = None) -> dict:
     path = Path(path or os.environ.get("PLAUDIT_CONFIG", "~/plaudit/plaudit.yaml")).expanduser()
     user = yaml.safe_load(path.read_text()) if path.exists() else {}
-    cfg = _merge(DEFAULTS, user or {})
+    load_env(path.with_name(".env"))
+    cfg = _merge(copy.deepcopy(DEFAULTS), user or {})  # nested dicts are shared otherwise and edits leak between loads
     for key in ("data_dir", "glossary"):
         cfg[key] = str(Path(cfg[key]).expanduser())
     cfg["sources"]["folder"]["path"] = str(Path(cfg["sources"]["folder"]["path"]).expanduser())
     if cfg["outputs"].get("markdown"):
         cfg["outputs"]["markdown"]["dir"] = str(Path(cfg["outputs"]["markdown"]["dir"]).expanduser())
     return cfg
+
+
+def load_env(path: Path) -> None:
+    """Put KEY=value lines of `path` into the environment unless already set there. Blank lines, `#` comments,
+    an `export ` prefix and single or double quotes around the value are accepted."""
+    if not path.exists():
+        return
+    for line in path.read_text().splitlines():
+        line = line.strip().removeprefix("export ")
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
 
 
 def secret(env_name: str | None) -> str | None:

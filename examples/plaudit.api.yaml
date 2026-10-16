@@ -1,6 +1,7 @@
 # Plaudit without a GPU: transcription and summary over HTTP, Markdown output only.
 data_dir: ~/plaudit/data
 glossary: ~/plaudit/glossary.txt
+# Secrets: environment variables, or a .env file next to this one (KEY=value lines).
 
 sources:
   folder:

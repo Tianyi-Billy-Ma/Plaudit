@@ -5,3 +5,4 @@ dist/
 .pytest_cache/
 plaudit.yaml
 data/
+.env
