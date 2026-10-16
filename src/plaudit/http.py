@@ -25,6 +25,7 @@ def post_json(url: str, payload: dict, headers: dict | None = None, timeout: int
     hdrs = {"Content-Type": "application/json", "User-Agent": UA, **(headers or {})}
     for attempt in range(retries):
         req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
+        started = time.time()
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode())
@@ -35,8 +36,9 @@ def post_json(url: str, payload: dict, headers: dict | None = None, timeout: int
                 continue
             raise HttpError(e.code, body) from None
         except (urllib.error.URLError, TimeoutError, http.client.HTTPException, ConnectionError):
-            # HTTPException covers IncompleteRead/RemoteDisconnected: a proxy cut a long (10 min) chunked reply
-            if attempt < retries - 1:
+            # HTTPException covers IncompleteRead/RemoteDisconnected. A cut after minutes is the proxy giving up
+            # on a reply the model is still thinking about: retrying that only repeats it, so it is raised at once.
+            if attempt < retries - 1 and time.time() - started < 300:
                 time.sleep(2 ** attempt)
                 continue
             raise
