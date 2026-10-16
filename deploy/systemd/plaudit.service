@@ -1,7 +1,7 @@
 # ~/.config/systemd/user/plaudit.service: one run per start, in a capped container. Pair with plaudit.timer.
 # Secrets come from ~/.config/secrets.env (mode 600, KEY=value lines, see README) and are passed into the container
-# as environment variables. Fetching them from a secret manager on every tick is not worth it: 1Password's daily
-# quota was exhausted that way (2026-10-15), and these values rarely change.
+# as environment variables. Do not fetch them from a secret manager on every tick: 288 reads a day for values that
+# never change is how a daily API quota gets exhausted.
 [Unit]
 Description=Plaudit: pull new recordings and process the queue once
 

@@ -42,7 +42,7 @@ def test_queue_end_to_end_via_folder(cfg, clip, tmp_path):
 def test_failed_job_stays_waiting(cfg, clip, tmp_path):
     q = Queue(cfg)
     from plaudit.sources import new_job
-    job = new_job(q.data / "inbox", clip, "bad", "manual")
+    job = new_job(clip, "bad", "manual")
 
     class Boom:
         def diarize(self, wav):

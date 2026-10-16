@@ -1,5 +1,5 @@
 # One short-lived container per run. Secrets come from the caller's environment, e.g.
-#   op run --environment "$OP_ENVIRONMENT_ID" -- docker compose run --rm plaudit
+#   set -a; . ~/.config/secrets.env; set +a; docker compose run --rm plaudit
 services:
   plaudit:
     build: .

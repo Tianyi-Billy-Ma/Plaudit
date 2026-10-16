@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 AUDIO_EXT = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".opus", ".flac", ".mp4", ".webm", ".wma"}
 
 
-def new_job(inbox: Path, audio: Path, title: str, source: str, source_id: str = "", when: str | None = None) -> dict:
+def new_job(audio: Path, title: str, source: str, source_id: str = "", when: str | None = None) -> dict:
     jid = time.strftime("%Y%m%d-%H%M%S") + "-" + re.sub(r"\W+", "", source_id or title)[:24]
     return {"id": jid, "title": title, "date": local_date(when), "source": source,
             "source_id": source_id, "audio": str(audio), "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -53,7 +53,7 @@ class FolderSource:
             when = datetime.fromtimestamp(f.stat().st_mtime).astimezone().isoformat()  # local, not UTC like Plaud
             dest = self.inbox / f"{int(time.time())}-{f.name}"
             shutil.move(str(f), dest)
-            yield new_job(self.inbox, dest, f.stem, "folder", source_id=dest.name, when=when)
+            yield new_job(dest, f.stem, "folder", source_id=dest.name, when=when)
 
 
 class PlaudSource:
@@ -87,7 +87,7 @@ class PlaudSource:
             dest = self.inbox / f"plaud-{fid}{ext}"
             download(url, dest)
             self._mark_seen(fid)
-            yield new_job(self.inbox, dest, details.get("name") or f"Plaud {fid}", "plaud", fid,
+            yield new_job(dest, details.get("name") or f"Plaud {fid}", "plaud", fid,
                           details.get("start_at") or details.get("created_at"))
 
     def _mark_seen(self, fid: str) -> None:

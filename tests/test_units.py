@@ -76,7 +76,7 @@ def test_stuck_job_gets_stub_page(cfg, clip, tmp_path):
 
     sink = StubSink()
     q = Queue(cfg)
-    job = new_job(q.data / "inbox", clip, "old failure", "manual")
+    job = new_job(clip, "old failure", "manual")
     job["first_failure"] = (datetime.now() - timedelta(hours=25)).isoformat(timespec="seconds")
     q.process(job, Pipeline(cfg, diarizer=Boom(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(), sinks=[sink]))
     assert job["status"] == "stuck" and job["stuck_page"] == "notion://stub"
@@ -221,7 +221,7 @@ def test_failed_job_backs_off_before_retrying(cfg, clip):
             raise RuntimeError("down")
 
     q = Queue(cfg)
-    job = new_job(q.data / "inbox", clip, "flaky", "manual")
+    job = new_job(clip, "flaky", "manual")
     pipe = Pipeline(cfg, diarizer=Boom(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(), sinks=[])
     assert due(job)
     q.process(job, pipe)
@@ -342,3 +342,29 @@ def test_reasoning_effort_is_sent_only_when_configured(cfg, monkeypatch):
     cfg["summary"]["reasoning_effort"] = "none"
     Summarizer(cfg)._chat_uncached("s", "u")
     assert "reasoning_effort" not in sent[0] and sent[1]["reasoning_effort"] == "none"
+
+
+def test_dotenv_next_to_config_fills_missing_env_vars(tmp_path, monkeypatch):
+    from plaudit import config
+
+    monkeypatch.delenv("PLAUDIT_T_A", raising=False)
+    monkeypatch.setenv("PLAUDIT_T_B", "from-env")
+    (tmp_path / "plaudit.yaml").write_text("retention_days: 3\n")
+    (tmp_path / ".env").write_text("# secrets\nexport PLAUDIT_T_A='a b'\nPLAUDIT_T_B=\"from-file\"\nbroken line\n")
+    assert config.load(tmp_path / "plaudit.yaml")["retention_days"] == 3
+    assert config.secret("PLAUDIT_T_A") == "a b"
+    assert config.secret("PLAUDIT_T_B") == "from-env"  # the environment wins over the file
+
+
+def test_process_command_output_joins_the_queue_as_done(cfg, clip, tmp_path, monkeypatch):
+    from conftest import FakeDiarizer, FakeTranscriber
+
+    from plaudit import cli, pipeline
+    from plaudit.daemon import Queue
+
+    monkeypatch.setattr(pipeline, "diarize", type("D", (), {"build": staticmethod(lambda cfg: FakeDiarizer())}))
+    monkeypatch.setattr(pipeline, "transcribe", type("T", (), {"build": staticmethod(lambda cfg: FakeTranscriber())}))
+    assert cli.main(["-c", str(tmp_path / "plaudit.yaml"), "process", str(clip), "--title", "Manual"]) == 0
+    jobs = Queue(cfg).jobs()
+    assert len(jobs) == 1 and jobs[0]["status"] == "done" and jobs[0]["title"] == "Manual"
+    assert (Queue(cfg).done_dir / jobs[0]["id"] / clip.name).exists()  # the original audio is kept for the backup

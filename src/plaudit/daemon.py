@@ -111,7 +111,7 @@ class Queue:
             job["attempts"] += 1
             job["last_error"] = f"{type(e).__name__}: {e}"[:500]
             job.setdefault("first_failure", datetime.now().isoformat(timespec="seconds"))
-            # Back off 10 min, 20, 40 ... up to 2 h: a retry every 5 min hammers CPA/Notion and the 1Password quota.
+            # Back off 10 min, 20, 40 ... up to 2 h: a retry every 5 min hammers the LLM endpoint and Notion for nothing.
             job["not_before"] = (datetime.now() + min(timedelta(hours=2), timedelta(minutes=10 * 2 ** (job["attempts"] - 1)))
                                  ).isoformat(timespec="seconds")
             if datetime.now() - datetime.fromisoformat(job["first_failure"]) > STUCK_AFTER and job["status"] != "stuck":
