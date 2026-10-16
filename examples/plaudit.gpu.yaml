@@ -25,6 +25,7 @@ summary:
   api_key_env: OPENAI_API_KEY
   language: zh             # zh: 摘要/决定/行动项 with English terms kept; en: Summary/Decisions/Action items
   chunk_chars: 12000
+  reasoning_effort: none   # reasoning models (GLM, Qwen3, DeepSeek) otherwise think for minutes per chunk; drop for plain models
 
 outputs:
   markdown:

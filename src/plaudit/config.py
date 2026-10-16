@@ -22,6 +22,7 @@ DEFAULTS: dict = {
         "api_key_env": "OPENAI_API_KEY",
         "language": "zh",
         "chunk_chars": 12000,
+        "reasoning_effort": None,  # "none" switches a reasoning model's thinking off (GLM, Qwen3, DeepSeek)
     },
     "outputs": {
         "markdown": {"dir": "~/plaudit/data/notes"},
