@@ -49,6 +49,7 @@ def _merge(base: dict, override: dict) -> dict:
 def load(path: str | os.PathLike | None = None) -> dict:
     path = Path(path or os.environ.get("PLAUDIT_CONFIG", "~/plaudit/plaudit.yaml")).expanduser()
     user = yaml.safe_load(path.read_text()) if path.exists() else {}
+    _refuse_secrets(user or {})
     load_env(path.with_name(".env"))
     cfg = _merge(copy.deepcopy(DEFAULTS), user or {})  # nested dicts are shared otherwise and edits leak between loads
     for key in ("data_dir", "glossary"):
@@ -57,6 +58,18 @@ def load(path: str | os.PathLike | None = None) -> dict:
     if cfg["outputs"].get("markdown"):
         cfg["outputs"]["markdown"]["dir"] = str(Path(cfg["outputs"]["markdown"]["dir"]).expanduser())
     return cfg
+
+
+def _refuse_secrets(d: dict, prefix: str = "") -> None:
+    """A secret typed into plaudit.yaml would be silently ignored (or, for a webhook URL, backed up with the notes),
+    so the file is rejected instead and the message says where the value belongs."""
+    for k, v in d.items():
+        hook_url = k == "url" and isinstance(v, str) and ("hooks.slack.com/" in v or "discord.com/api/webhooks/" in v)
+        if k in ("api_key", "token", "password") or hook_url:
+            raise ValueError(f"{prefix}{k}: secrets never go in plaudit.yaml. Set {prefix}{k}_env to a variable name "
+                             f"and put the value in the environment or in the .env file next to plaudit.yaml")
+        if isinstance(v, dict):
+            _refuse_secrets(v, f"{prefix}{k}.")
 
 
 def load_env(path: Path) -> None:

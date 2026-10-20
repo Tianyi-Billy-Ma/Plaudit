@@ -344,6 +344,21 @@ def test_reasoning_effort_is_sent_only_when_configured(cfg, monkeypatch):
     assert "reasoning_effort" not in sent[0] and sent[1]["reasoning_effort"] == "none"
 
 
+def test_config_refuses_secrets_in_yaml(tmp_path):
+    import pytest
+    from plaudit import config
+
+    p = tmp_path / "plaudit.yaml"
+    for body, key in (("outputs:\n  notion:\n    token: secret_x\n", "outputs.notion.token"),
+                      ("summary:\n  api_key: sk-x\n", "summary.api_key"),
+                      ("outputs:\n  webhook:\n    url: https://hooks.slack.com/services/T/B/x\n", "outputs.webhook.url")):
+        p.write_text(body)
+        with pytest.raises(ValueError, match=key):
+            config.load(p)
+    p.write_text("outputs:\n  webhook:\n    url: https://n8n.example/hook\n")
+    assert config.load(p)["outputs"]["webhook"]["url"] == "https://n8n.example/hook"  # a plain URL is fine
+
+
 def test_dotenv_next_to_config_fills_missing_env_vars(tmp_path, monkeypatch):
     from plaudit import config
 
@@ -385,6 +400,7 @@ def test_webhook_output_formats_and_gets_earlier_links(cfg, clip, tmp_path, monk
     url, payload = sent[0]
     assert url == "https://hooks.example/x" and payload["text"].startswith("*Standup (2026-10-20, 0.1 min)\n")
     assert r["links"][0] in payload["text"] and "## 摘要" in payload["text"]  # the Markdown path, then the minutes
+    assert r["links"][1] == "webhook:slack"  # the URL is a secret and links get logged and backed up
 
     cfg["outputs"]["webhook"]["format"] = "generic"
     outputs.WebhookOutput(cfg).publish_stuck({"title": "t", "date": "d"}, "boom")

@@ -119,7 +119,7 @@ class WebhookOutput:
     def _send(self, text: str, event: dict) -> str:
         payload = {"slack": {"text": text}, "discord": {"content": text[:2000]}}.get(self.format, event)
         post_json(self.url, payload, retries=1)  # a notification is not worth a duplicate on retry
-        return self.url
+        return f"webhook:{self.format}"  # not the URL: links are logged, kept in the job file and backed up
 
     def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
         text = f"*{headline(meta, links)}*\n\n{summary.strip()}"
