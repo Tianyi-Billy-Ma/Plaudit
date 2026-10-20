@@ -39,6 +39,8 @@ class Pipeline:
         summary = (self.summarizer.summarize(transcript.as_text(), config.glossary(self.cfg), workdir / "summary-cache.json")
                    if self.summarizer else "")
         (workdir / "notes.md").write_text(outputs.render_markdown(meta, summary, transcript, audio_link))
-        links = [sink.publish(meta, summary, transcript, audio_link) for sink in self.sinks]
+        links: list[str] = []
+        for sink in self.sinks:  # notifying sinks come last and get the links written so far
+            links.append(sink.publish(meta, summary, transcript, audio_link, links=list(links)))
         wav.unlink()
         return {"meta": meta, "summary": summary, "transcript": transcript, "links": links}

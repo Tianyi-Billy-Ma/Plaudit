@@ -368,3 +368,72 @@ def test_process_command_output_joins_the_queue_as_done(cfg, clip, tmp_path, mon
     jobs = Queue(cfg).jobs()
     assert len(jobs) == 1 and jobs[0]["status"] == "done" and jobs[0]["title"] == "Manual"
     assert (Queue(cfg).done_dir / jobs[0]["id"] / clip.name).exists()  # the original audio is kept for the backup
+
+
+def test_webhook_output_formats_and_gets_earlier_links(cfg, clip, tmp_path, monkeypatch):
+    from conftest import FakeDiarizer, FakeSummarizer, FakeTranscriber
+
+    from plaudit import outputs
+    from plaudit.pipeline import Pipeline
+
+    sent = []
+    monkeypatch.setattr(outputs, "post_json", lambda url, payload, *a, **k: sent.append((url, payload)) or {})
+    cfg["outputs"]["webhook"].update(url="https://hooks.example/x", format="slack")
+    pipe = Pipeline(cfg, diarizer=FakeDiarizer(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(),
+                    sinks=[outputs.MarkdownOutput(cfg), outputs.WebhookOutput(cfg)])
+    r = pipe.process(clip, {"title": "Standup", "date": "2026-10-20", "source": "manual", "id": "j1"}, tmp_path / "w")
+    url, payload = sent[0]
+    assert url == "https://hooks.example/x" and payload["text"].startswith("*Standup (2026-10-20, 0.1 min)\n")
+    assert r["links"][0] in payload["text"] and "## 摘要" in payload["text"]  # the Markdown path, then the minutes
+
+    cfg["outputs"]["webhook"]["format"] = "generic"
+    outputs.WebhookOutput(cfg).publish_stuck({"title": "t", "date": "d"}, "boom")
+    assert sent[1][1] == {"event": "meeting.stuck", "meta": {"title": "t", "date": "d"}, "error": "boom"}
+
+    monkeypatch.setenv("PLAUDIT_WEBHOOK_URL", "https://hooks.example/env")
+    cfg["outputs"]["webhook"]["url"] = None
+    assert [type(o).__name__ for o in outputs.build(cfg)] == ["MarkdownOutput", "WebhookOutput"]
+    assert outputs.build(cfg)[1].url == "https://hooks.example/env"
+
+
+def test_email_output(cfg, monkeypatch):
+    from plaudit import outputs
+    from plaudit.models import Transcript
+
+    class FakeSMTP:
+        calls = []
+
+        def __init__(self, host, port, timeout=0):
+            self.calls.append(("connect", host, port))
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+        def starttls(self):
+            self.calls.append(("starttls",))
+
+        def login(self, user, password):
+            self.calls.append(("login", user, password))
+
+        def send_message(self, msg):
+            self.calls.append(("send", msg))
+
+    monkeypatch.setattr(outputs.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setenv("PLAUDIT_SMTP_USER", "me@example.com")
+    monkeypatch.setenv("PLAUDIT_SMTP_PASSWORD", "pw")
+    cfg["outputs"]["email"].update(to="you@example.com", smtp_host="smtp.example.com")
+    out = outputs.build(cfg)[-1]
+    assert isinstance(out, outputs.EmailOutput)
+    t = Transcript([Segment(0, 1, "A", "hi")])
+    assert out.publish({"title": "Standup", "date": "2026-10-20", "source": "manual", "duration_min": 1}, "## Summary\n- x", t,
+                       links=["https://notion.so/p"]) == "mailto:you@example.com"
+    kinds = [c[0] for c in FakeSMTP.calls]
+    assert kinds == ["connect", "starttls", "login", "send"] and FakeSMTP.calls[0][1:] == ("smtp.example.com", 587)
+    msg = FakeSMTP.calls[-1][1]
+    assert msg["Subject"] == "[Plaudit] Standup (2026-10-20)" and msg["From"] == "me@example.com" and msg["To"] == "you@example.com"
+    body, attachment = msg.iter_parts()
+    assert "https://notion.so/p" in body.get_content() and "- x" in body.get_content()
+    assert attachment.get_filename() == "notes.md" and "[00:00:00] A: hi" in attachment.get_content()

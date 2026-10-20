@@ -36,6 +36,13 @@ outputs:
     token_env: NOTION_TOKEN
     # status_done: Done       # option names when the database has its own Status column
     # status_stuck: WIP
+  # webhook:                # one POST per meeting: generic JSON, or a Slack / Discord message
+  #   url_env: PLAUDIT_WEBHOOK_URL
+  #   format: slack         # generic | slack | discord
+  # email:                  # the minutes by e-mail, full notes attached
+  #   to: [you@example.com]
+  #   smtp_host: smtp.example.com
+  #   smtp_port: 587        # tls: starttls (587) | ssl (465) | none; login from $PLAUDIT_SMTP_USER / $PLAUDIT_SMTP_PASSWORD
 
 backup:
   remote: gdrive:Meetings  # rclone remote; null to disable. Files land in YYYY/MM/<job>/
