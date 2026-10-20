@@ -9,8 +9,7 @@ services:
       - NOTION_TOKEN
       - PLAUDIT_ASR_API_KEY
       - PLAUDIT_WEBHOOK_URL
-      - PLAUDIT_SMTP_USER
-      - PLAUDIT_SMTP_PASSWORD
+      - PLAUDIT_NOTIFY_URLS
     volumes:
       - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface   # shared Hugging Face model cache
