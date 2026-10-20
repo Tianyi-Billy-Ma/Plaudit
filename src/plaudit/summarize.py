@@ -43,7 +43,7 @@ class Summarizer:
         self.model = sc["model"]
         self.lang = sc["language"]
         self.chunk_chars = sc["chunk_chars"]
-        self.extra = {"reasoning_effort": sc["reasoning_effort"]} if sc.get("reasoning_effort") else {}
+        self.extra = {k: sc[k] for k in ("temperature", "reasoning_effort") if sc.get(k) is not None}
         self.cache, self.cache_file = {}, None
         self.headers = {}
         if key := secret(sc.get("api_key_env")):
@@ -63,7 +63,7 @@ class Summarizer:
     def _chat_uncached(self, system: str, user: str) -> str:
         try:
             resp = post_json(self.url, {
-                "model": self.model, "temperature": 0.2,
+                "model": self.model,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
                 **self.extra,
             }, self.headers)

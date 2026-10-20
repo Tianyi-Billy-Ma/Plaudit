@@ -29,16 +29,10 @@ class QwenASRTranscriber:
         self.model = AutoModelForMultimodalLM.from_pretrained(model_id, dtype=dtype).to(dev).eval()
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
-        import numpy as np
         import torch
 
-        from .audio import SAMPLE_RATE
-
         pcm = read_pcm(wav)
-        clips = []
-        for t in turns:
-            a, b = int(t.start * SAMPLE_RATE) * 2, int(t.end * SAMPLE_RATE) * 2
-            clips.append(np.frombuffer(pcm[a:b], dtype=np.int16).astype(np.float32) / 32768.0)
+        clips = [clip_float(pcm, t) for t in turns]
         # the glossary goes in as the system prompt (`prompt`), the documented way to bias terms
         prompt = ", ".join(glossary(self.cfg)) or None
         for i in range(0, len(clips), self.BATCH):
@@ -51,6 +45,26 @@ class QwenASRTranscriber:
             texts = self.processor.decode(out[:, inputs["input_ids"].shape[1]:], return_format="transcription_only")
             for t, text in zip(turns[i:i + self.BATCH], texts):
                 t.text = text.strip()
+        return turns
+
+
+class WhisperTranscriber:
+    """Whisper through faster-whisper (CTranslate2, CPU or CUDA). `model` is a size (`large-v3`, `turbo`) or a path."""
+
+    def __init__(self, cfg: dict):
+        from faster_whisper import WhisperModel
+
+        # faster-whisper's own device pick (CUDA else CPU) equals device.pick() here, since CTranslate2 has no MPS,
+        # and it needs no torch: the whisper extra must stay usable on a CPU box without it.
+        self.model = WhisperModel(cfg["transcription"]["model"])
+        self.language = LANGUAGE_CODES.get(cfg["language"], cfg["language"])
+        self.prompt = ", ".join(glossary(cfg)) or None
+
+    def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
+        pcm = read_pcm(wav)
+        for t in turns:
+            segments, _ = self.model.transcribe(clip_float(pcm, t), language=self.language, initial_prompt=self.prompt)
+            t.text = " ".join(s.text.strip() for s in segments)
         return turns
 
 
@@ -81,7 +95,17 @@ class OpenAICompatTranscriber:
         return turns
 
 
-BACKENDS = {"qwen_asr": QwenASRTranscriber, "openai": OpenAICompatTranscriber}
+def clip_float(pcm: bytes, t: Segment):
+    """One turn of 16 kHz mono int16 PCM as float32 in [-1, 1]."""
+    import numpy as np
+
+    from .audio import SAMPLE_RATE
+
+    a, b = int(t.start * SAMPLE_RATE) * 2, int(t.end * SAMPLE_RATE) * 2
+    return np.frombuffer(pcm[a:b], dtype=np.int16).astype(np.float32) / 32768.0
+
+
+BACKENDS = {"qwen_asr": QwenASRTranscriber, "whisper": WhisperTranscriber, "openai": OpenAICompatTranscriber}
 
 
 def build(cfg: dict):

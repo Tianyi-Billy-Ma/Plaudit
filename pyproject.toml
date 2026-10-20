@@ -13,6 +13,7 @@ dependencies = ["pyyaml>=6"]
 
 [project.optional-dependencies]
 gpu = ["transformers>=5.19", "torch", "numpy", "librosa"]
+whisper = ["faster-whisper>=1.1", "numpy"]
 dev = ["pytest"]
 
 [project.scripts]
