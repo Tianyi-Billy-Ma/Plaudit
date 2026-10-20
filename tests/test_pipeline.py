@@ -63,8 +63,9 @@ def test_job_left_running_by_a_killed_run_counts_as_an_attempt(cfg, tmp_path, mo
     assert job["status"] == "stuck" and job["attempts"] == 3 and "died" in job["last_error"]
 
 
-def test_mem_available():
+def test_mem_available(tmp_path):
     assert round(mem_available_gb("MemTotal: 1 kB\nMemAvailable:  8388608 kB\n"), 1) == 8.0
+    assert mem_available_gb(path=tmp_path / "no-proc-meminfo") == float("inf")  # macOS: guard off, not a crash
 
 
 def test_retire_backs_up_then_deletes_after_retention(cfg, tmp_path, monkeypatch):
