@@ -1,0 +1,20 @@
+# Tag a release (git tag v0.1.0 && git push --tags) and this publishes it to PyPI through trusted publishing:
+# register the publisher once at https://pypi.org/manage/account/publishing/ (owner Tianyi-Billy-Ma, repo Plaudit,
+# workflow release.yml, environment pypi). No API token is stored anywhere.
+name: Release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  pypi:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build && python -m build
+      - uses: pypa/gh-action-pypi-publish@release/v1

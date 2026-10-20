@@ -9,18 +9,20 @@ Plaudit is not affiliated with Plaud. It reads Plaud recordings only through the
 ## Install
 
 ```bash
-pip install "plaudit @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"          # core: watched folder, transcription over HTTP, Markdown/Notion output
-pip install "plaudit[gpu] @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"     # adds transformers, torch, numpy, librosa for the local models
-sudo apt install ffmpeg          # required (ffmpeg and ffprobe)
+pip install plaudit              # or: uv tool install plaudit / pipx install plaudit / uvx plaudit
+pip install "plaudit[gpu]"       # adds transformers, torch, numpy, librosa for the local models
+sudo apt install ffmpeg          # required (ffmpeg and ffprobe); brew install ffmpeg on a Mac
 sudo apt install rclone          # only for backups
 npm i -g @plaud-ai/cli           # only for the Plaud source (Node 22+), then `plaud login` once
+plaudit init                     # writes ~/plaudit/plaudit.yaml, inbox/ and glossary.txt (--api for the no-GPU config)
+plaudit process meeting.m4a      # first result: minutes printed, notes in ~/plaudit/data/notes
 ```
 
-Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly 6 GB of GPU or unified memory; see [Run on your hardware](#run-on-your-hardware).
+Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly 6 GB of GPU or unified memory; see [Run on your hardware](#run-on-your-hardware). Until the first PyPI release, install from git: `pip install "plaudit[gpu] @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"`.
 
 ## Configure
 
-Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Another location works with `plaudit -c path/plaudit.yaml` or `PLAUDIT_CONFIG=path/plaudit.yaml`. Every key is optional; the defaults are in `src/plaudit/config.py`.
+`plaudit init` writes the local-models config (`plaudit init --api` the no-GPU one, transcription over HTTP) to `~/plaudit/plaudit.yaml`; edit it. The two templates are `src/plaudit/examples/`. Another location works with `plaudit -c path/plaudit.yaml` or `PLAUDIT_CONFIG=path/plaudit.yaml`. Every key is optional; the defaults are in `src/plaudit/config.py`.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
@@ -67,7 +69,7 @@ Secrets never go in `plaudit.yaml`. Plaudit reads them from environment variable
 | --- | --- |
 | `OPENAI_API_KEY` | the chat endpoint that writes the minutes |
 | `NOTION_TOKEN` | Notion internal integration, when `outputs.notion.database_id` is set |
-| `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in `examples/plaudit.api.yaml` |
+| `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in the `--api` config |
 | `PLAUDIT_WEBHOOK_URL` | Slack / Discord incoming-webhook URL, when `outputs.webhook.format` is `slack` or `discord` |
 | `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | SMTP login, when `outputs.email.smtp_host` is set |
 
@@ -78,6 +80,7 @@ The Plaud CLI keeps its own login in `~/.plaud`, rclone its own in `~/.config/rc
 ## Run
 
 ```bash
+plaudit init [--api]         # starter config, inbox/ and glossary.txt; never overwrites
 plaudit run                  # pull new recordings, process the queue once, back up, exit
 plaudit run --loop 300       # the same every 5 minutes; models are reloaded each cycle so memory is free in between
 plaudit pull                 # only fetch new recordings into the queue
@@ -128,6 +131,8 @@ An existing database works too. Columns are matched by name and type and missing
 pip install -e ".[dev]"
 pytest -q
 ```
+
+Releases: `git tag v0.1.1 && git push --tags` builds the package and publishes it to PyPI through trusted publishing (`.github/workflows/release.yml`, no token stored); bump `version` in `pyproject.toml` and `src/plaudit/__init__.py` first.
 
 The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
 

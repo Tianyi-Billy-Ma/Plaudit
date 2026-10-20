@@ -455,6 +455,18 @@ def test_email_output(cfg, monkeypatch):
     assert attachment.get_filename() == "notes.md" and "[00:00:00] A: hi" in attachment.get_content()
 
 
+def test_init_writes_starter_config_once(tmp_path, capsys):
+    from plaudit.cli import main
+
+    cfg = tmp_path / "plaudit.yaml"
+    assert main(["-c", str(cfg), "init", "--api"]) == 0
+    assert "backend: openai" in cfg.read_text()
+    cfg.write_text("data_dir: keep\n")
+    assert main(["-c", str(cfg), "init"]) == 0
+    assert cfg.read_text() == "data_dir: keep\n"  # never overwrites
+    assert "leaving it alone" in capsys.readouterr().out
+
+
 def test_http_transcriber_sends_iso_language_code(cfg, monkeypatch):
     from plaudit import transcribe
 
