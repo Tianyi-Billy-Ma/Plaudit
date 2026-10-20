@@ -46,8 +46,12 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+def config_path(arg: str | os.PathLike | None = None) -> Path:
+    return Path(arg or os.environ.get("PLAUDIT_CONFIG", "~/plaudit/plaudit.yaml")).expanduser()
+
+
 def load(path: str | os.PathLike | None = None) -> dict:
-    path = Path(path or os.environ.get("PLAUDIT_CONFIG", "~/plaudit/plaudit.yaml")).expanduser()
+    path = config_path(path)
     user = yaml.safe_load(path.read_text()) if path.exists() else {}
     load_env(path.with_name(".env"))
     cfg = _merge(copy.deepcopy(DEFAULTS), user or {})  # nested dicts are shared otherwise and edits leak between loads
