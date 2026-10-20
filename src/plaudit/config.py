@@ -32,9 +32,8 @@ DEFAULTS: dict = {
     "outputs": {
         "markdown": {"dir": "~/plaudit/data/notes"},
         "notion": {"database_id": None, "token_env": "NOTION_TOKEN"},
-        "webhook": {"url": None, "url_env": "PLAUDIT_WEBHOOK_URL", "format": "generic"},  # generic | slack | discord
-        "email": {"to": [], "smtp_host": None, "smtp_port": 587, "tls": "starttls",  # starttls | ssl | none
-                  "from": None, "user_env": "PLAUDIT_SMTP_USER", "password_env": "PLAUDIT_SMTP_PASSWORD"},
+        "webhook": {"url": None, "url_env": "PLAUDIT_WEBHOOK_URL"},  # JSON POST for n8n, Zapier, Home Assistant
+        "notify": {"urls": [], "urls_env": "PLAUDIT_NOTIFY_URLS"},  # Apprise URLs: Slack, Discord, Teams, e-mail...
     },
     "backup": {"remote": None},  # e.g. "gdrive:Meetings"; None = off
     "retention_days": 7,
