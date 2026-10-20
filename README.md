@@ -71,7 +71,9 @@ Secrets never go in `plaudit.yaml`. Plaudit reads them from environment variable
 | `PLAUDIT_WEBHOOK_URL` | Slack / Discord incoming-webhook URL, when `outputs.webhook.format` is `slack` or `discord` |
 | `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | SMTP login, when `outputs.email.smtp_host` is set |
 
-The Plaud CLI keeps its own login in `~/.plaud`, rclone its own in `~/.config/rclone/rclone.conf`.
+A key named `api_key`, `token` or `password` in `plaudit.yaml`, or a Slack/Discord webhook URL under `url`, makes Plaudit refuse to start with a message naming the `_env` key to use instead. Output links that are logged, kept in the job file and backed up never contain the webhook URL.
+
+The Plaud CLI keeps its own login in `~/.plaud`, rclone its own in `~/.config/rclone/rclone.conf`. Plaudit sends nothing anywhere you did not configure: the Docker image sets `HF_HUB_DISABLE_TELEMETRY=1`, so model downloads from Hugging Face carry no usage telemetry either; set it yourself when running outside Docker.
 
 ## Run
 
@@ -106,7 +108,7 @@ An existing database works too. Columns are matched by name and type and missing
 
 `Dockerfile` builds an image with ffmpeg, rclone, Node 22, the Plaud CLI and the `gpu` extras. The default base image is the aarch64 vLLM image (DGX Spark / GB10); on x86_64 pass `--build-arg BASE=vllm/vllm-openai:v0.29.0`, and for the CPU/API mode `--build-arg BASE=python:3.12-slim --build-arg EXTRAS=`. The image reads `/plaudit/plaudit.yaml` and expects these mounts: `/plaudit` (config, glossary, data), `/root/.cache/huggingface` (models), `/root/.plaud` (Plaud login), `/root/.config/rclone` (read-only), `/etc/localtime` (read-only).
 
-`docker-compose.yml` runs one container per `docker compose run --rm plaudit`; `deploy/systemd/plaudit.service` and `plaudit.timer` start one such container every 5 minutes as a systemd user unit, with a hard memory cap and an 8 h limit per run (a 2 h recording with a slow summariser needs about 3.5 h). The unit sources `~/.config/secrets.env` in a shell and passes `OPENAI_API_KEY` and `NOTION_TOKEN` into the container; a `.env` next to `plaudit.yaml` inside the mounted folder works as well. Copy the two unit files to `~/.config/systemd/user/` and run `systemctl --user enable --now plaudit.timer`; stop everything with `systemctl --user disable --now plaudit.timer`.
+`docker-compose.yml` runs one container per `docker compose run --rm plaudit`; `deploy/systemd/plaudit.service` and `plaudit.timer` start one such container every 5 minutes as a systemd user unit, with a hard memory cap and an 8 h limit per run (a 2 h recording with a slow summariser needs about 3.5 h). The unit sources `~/.config/secrets.env` in a shell and passes the variables from the table above into the container (unset ones are skipped); a `.env` next to `plaudit.yaml` inside the mounted folder works as well. Copy the two unit files to `~/.config/systemd/user/` and run `systemctl --user enable --now plaudit.timer`; stop everything with `systemctl --user disable --now plaudit.timer`.
 
 ## Development
 

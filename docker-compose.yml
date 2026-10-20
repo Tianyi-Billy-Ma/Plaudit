@@ -4,9 +4,13 @@ services:
   plaudit:
     build: .
     image: plaudit:0.1.0
-    environment:
+    environment:                             # only the ones set in the caller's environment are passed
       - OPENAI_API_KEY
       - NOTION_TOKEN
+      - PLAUDIT_ASR_API_KEY
+      - PLAUDIT_WEBHOOK_URL
+      - PLAUDIT_SMTP_USER
+      - PLAUDIT_SMTP_PASSWORD
     volumes:
       - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface   # shared Hugging Face model cache
