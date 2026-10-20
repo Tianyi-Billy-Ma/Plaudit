@@ -1,8 +1,8 @@
 # Per-job pipeline image. Default base is the aarch64 vLLM image (CUDA + torch for DGX Spark / GB10);
-# for x86_64 use --build-arg BASE=vllm/vllm-openai:v0.29.0, for CPU/API mode BASE=python:3.12-slim EXTRAS=.
+# for x86_64 use --build-arg BASE=vllm/vllm-openai:v0.29.0, for CPU/API mode BASE=python:3.12-slim EXTRAS=notify (the notify extra is Apprise).
 ARG BASE=vllm/vllm-openai:v0.29.0-aarch64
 FROM ${BASE}
-ARG EXTRAS=gpu
+ARG EXTRAS=gpu,notify
 
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg rclone curl ca-certificates \
     && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y nodejs \
