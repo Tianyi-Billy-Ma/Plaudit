@@ -104,9 +104,9 @@ Plaudit has no mandatory cloud service. Pick the profile that matches the machin
 | --- | --- | --- |
 | Linux box with an NVIDIA GPU (6 GB+ free) | `examples/plaudit.gpu.yaml` | Diarization and ASR locally on CUDA; summary through any OpenAI-compatible server on the same box (vLLM, Ollama, llama.cpp) or elsewhere |
 | Apple Silicon Mac (16 GB+) | `examples/plaudit.gpu.yaml` | Same two models locally on Metal (MPS) through PyTorch; summary via Ollama or LM Studio on the Mac. Slower than CUDA, and the memory guard is off, so run it when the Mac is otherwise idle |
-| CPU-only server, Raspberry Pi, NAS, small VPS | `examples/plaudit.api.yaml` | No model on the box: `transcription.backend: openai` sends each speaker turn to any `/v1/audio/transcriptions` server you run (whisper.cpp `server`, Speaches, vLLM with Qwen3-ASR, a GPU box on your LAN) and `diarization: none` keeps the transcript as one speaker; summary over HTTP as above |
+| CPU-only server, mini PC, small VPS | `examples/plaudit.api.yaml` | `transcription.backend: openai` sends each speaker turn to any `/v1/audio/transcriptions` server you run (whisper.cpp `server`, Speaches, vLLM with Qwen3-ASR, a GPU box on your LAN). Speaker labels still work without a GPU: `diarization: nemotron` is a 100M-parameter model that diarizes on a CPU in seconds (needs `pip install "plaudit[gpu]"`). With enough CPU and RAM (about 8 GB), `qwen_asr` runs on the CPU too, at roughly real time on a modern desktop CPU |
 
-The device is picked at start: CUDA, then MPS, then CPU. CPU-only inference of the local models works but is slow (minutes per minute of audio); use the HTTP profile instead. Mixed setups work too, for example one GPU box serving transcription over HTTP for several small machines that only watch folders and publish notes. Windows is not supported (the queue lock uses `fcntl`); use WSL.
+The device is picked at start: CUDA, then MPS, then CPU (fp32). Measured on a CPU-only container: a 24 s two-voice clip diarized in 0.4 s and transcribed by Qwen3-ASR in 15 s, so a Raspberry Pi should send transcription over HTTP while a desktop CPU can keep everything local. Mixed setups work too, for example one GPU box serving transcription over HTTP for several small machines that only watch folders and publish notes. Windows is not supported (the queue lock uses `fcntl`); use WSL.
 
 ## Notion
 
