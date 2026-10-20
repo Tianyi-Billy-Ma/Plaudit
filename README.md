@@ -2,7 +2,7 @@
 
 Plaudit turns meeting recordings from any device into speaker-labelled transcripts and summaries, on hardware you control. Chinese and English, including code-switching inside one sentence, are first-class.
 
-Pipeline: source → 16 kHz WAV → speaker turns (Nemotron-3-Diarization) → transcription per turn (Qwen3-ASR-1.7B, glossary as context) → minutes via any OpenAI-compatible LLM → Markdown file and/or a Notion page per meeting → verified rclone backup.
+Pipeline: source → 16 kHz WAV → speaker turns (Nemotron-3-Diarization) → transcription per turn (Qwen3-ASR-1.7B, glossary as context) → minutes via any OpenAI-compatible LLM → Markdown file, Notion page, webhook (Slack, Discord, n8n...) and/or e-mail per meeting → verified rclone backup.
 
 Plaudit is not affiliated with Plaud. It reads Plaud recordings only through the official `@plaud-ai/cli`, and never writes to or deletes from your Plaud account.
 
@@ -47,6 +47,14 @@ Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (
 | `outputs.notion.database_id` | `null` | set to publish one page per meeting into an existing database |
 | `outputs.notion.token_env` | `NOTION_TOKEN` | environment variable holding the Notion internal-integration token |
 | `outputs.notion.status_done` / `status_stuck` | `done` / `stuck` | option names to write into the database's `Status` column |
+| `outputs.webhook.url` | `null` | POST once per finished meeting (and once when a job gets stuck). For a Slack or Discord webhook URL, which is a secret, set `url_env` instead |
+| `outputs.webhook.url_env` | `PLAUDIT_WEBHOOK_URL` | environment variable holding the URL; wins over `url` |
+| `outputs.webhook.format` | `generic` | `generic`: JSON `{event: meeting.done|meeting.stuck, meta, summary, links, audio_link, transcript}` for n8n, Zapier, Make, Home Assistant...; `slack` / `discord`: a message with title, links and minutes to an incoming webhook of that service |
+| `outputs.email.to` | `[]` | one address or a list; the minutes in the body, the full notes as a `notes.md` attachment; a stuck job sends a short alert |
+| `outputs.email.smtp_host` / `smtp_port` | `null` / `587` | setting `smtp_host` turns the e-mail output on |
+| `outputs.email.tls` | `starttls` | `starttls` (port 587), `ssl` (port 465) or `none` (a local relay on port 25) |
+| `outputs.email.from` | sender login | `From:` address |
+| `outputs.email.user_env` / `password_env` | `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | environment variables with the SMTP login; leave the variables unset for a relay without authentication |
 | `backup.remote` | `null` | rclone remote and folder, e.g. `gdrive:Meetings`; finished jobs are copied to `YYYY/MM/<job id>/` and verified with `rclone check` |
 | `retention_days` | `7` | delete the local copy of a job this long after it finished, and only if its backup was verified |
 | `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this |
@@ -60,6 +68,8 @@ Secrets never go in `plaudit.yaml`. Plaudit reads them from environment variable
 | `OPENAI_API_KEY` | the chat endpoint that writes the minutes |
 | `NOTION_TOKEN` | Notion internal integration, when `outputs.notion.database_id` is set |
 | `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in `examples/plaudit.api.yaml` |
+| `PLAUDIT_WEBHOOK_URL` | Slack / Discord incoming-webhook URL, when `outputs.webhook.format` is `slack` or `discord` |
+| `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | SMTP login, when `outputs.email.smtp_host` is set |
 
 The Plaud CLI keeps its own login in `~/.plaud`, rclone its own in `~/.config/rclone/rclone.conf`.
 
@@ -82,7 +92,7 @@ Drop a file into the watched folder and it is queued on the next run. With the P
 - **Per speaker turn.** Audio is transcribed turn by turn, at most `max_turn_seconds` each, never as one long tensor. Diarization streams the recording in fixed chunks, so memory stays flat for multi-hour files.
 - **Retries, with backoff.** A failed job goes back to `waiting` and is retried after 10 min, then 20, 40, up to 2 h between attempts. The transcript is saved as `transcript.json` after diarization and ASR, so a retry after a summary or output failure skips straight to the summary. After 24 h of failures the job is marked `stuck`; if the Notion output is on, a stub page with status `stuck` and the error is created. A run killed mid-job (out of memory, reboot) counts as a failed attempt, and a job whose third attempt ends that way is marked `stuck` at once. There is no paid fallback.
 - **Summary of long meetings.** The transcript is split into parts of `chunk_chars`, each part is summarised, and the part minutes are merged in rounds until one set remains. Every answer is cached in `summary-cache.json` in the job folder (key: model + prompts), so a dropped connection or a retry does not repeat the calls already made. If the model returns no text (a reasoning model that spent its budget thinking, or a reply cut off after minutes), the part is halved and tried again; set `summary.reasoning_effort: none` for such models.
-- **Outputs are written once.** The Markdown file is never overwritten; a second meeting with the same title on the same day gets the job id appended. A Notion page is created once (the create call is not retried); if appending the transcript fails, the page keeps its minutes rather than being duplicated on the next attempt.
+- **Outputs are written once.** The Markdown file is never overwritten; a second meeting with the same title on the same day gets the job id appended. A Notion page is created once (the create call is not retried); if appending the transcript fails, the page keeps its minutes rather than being duplicated on the next attempt. The webhook and e-mail outputs run after the Markdown and Notion ones and include their links; a webhook POST is not retried, so a flaky receiver costs one notification, not a duplicate meeting page.
 - **Backup, then retention.** Every finished job without a verified backup is backed up on every later run until it passes. Local copies (converted audio removed, original audio, `notes.md`, `transcript.json`) are deleted only after a verified backup and `retention_days`.
 - **Dates are local.** Plaud reports times in UTC; Plaudit converts them to the machine's time zone (mount `/etc/localtime` into a container).
 
@@ -105,7 +115,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`), registered in the `BACKENDS` dict of its module.
+The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
 
 ## License
 

@@ -1,7 +1,10 @@
-"""Where results land: a Markdown folder and/or a Notion database (one page per meeting)."""
+"""Where results land: a Markdown folder, a Notion database (one page per meeting), a webhook (generic JSON,
+Slack or Discord) and/or an e-mail. The notifying outputs run last and receive the links the others produced."""
 from __future__ import annotations
 
 import logging
+import smtplib
+from email.message import EmailMessage
 from pathlib import Path
 
 from .config import secret
@@ -24,7 +27,7 @@ class MarkdownOutput:
     def __init__(self, cfg: dict):
         self.dir = Path(cfg["outputs"]["markdown"]["dir"])
 
-    def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None) -> str:
+    def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
         self.dir.mkdir(parents=True, exist_ok=True)
         path = self.dir / f"{meta['date']} {safe(meta['title'])}.md"
         if path.exists():  # second meeting with the same title that day
@@ -66,7 +69,7 @@ class NotionOutput:
                 props[col] = {t: by_type[t]}
         return props
 
-    def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None) -> str:
+    def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
         children = md_to_blocks(summary)
         if audio_link:
             children.append(_para(f"Audio: {audio_link}", link=audio_link))
@@ -96,6 +99,70 @@ class NotionOutput:
                                               "children": [_para(f"Plaudit could not process this recording: {error}"[:2000])]},
                          headers=self.headers)
         return page.get("url", page["id"])
+
+
+def headline(meta: dict, links=()) -> str:
+    return f"{meta['title']} ({meta['date']}, {meta.get('duration_min', '?')} min)" + "".join(f"\n{l}" for l in links)
+
+
+class WebhookOutput:
+    """One POST per finished (or stuck) meeting. `generic` sends the whole result as JSON for n8n, Zapier, Make,
+    Home Assistant...; `slack` and `discord` send a message to an incoming webhook of that service."""
+
+    def __init__(self, cfg: dict):
+        wc = cfg["outputs"]["webhook"]
+        self.url = secret(wc.get("url_env")) or wc.get("url")  # Slack/Discord webhook URLs are secrets
+        self.format = wc.get("format", "generic")
+        if not self.url or self.format not in ("generic", "slack", "discord"):
+            raise RuntimeError("outputs.webhook needs a url (or url_env) and format generic|slack|discord")
+
+    def _send(self, text: str, event: dict) -> str:
+        payload = {"slack": {"text": text}, "discord": {"content": text[:2000]}}.get(self.format, event)
+        post_json(self.url, payload, retries=1)  # a notification is not worth a duplicate on retry
+        return self.url
+
+    def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
+        text = f"*{headline(meta, links)}*\n\n{summary.strip()}"
+        return self._send(text, {"event": "meeting.done", "meta": meta, "summary": summary, "links": list(links),
+                                 "audio_link": audio_link, "transcript": transcript.to_dict()})
+
+    def publish_stuck(self, meta: dict, error: str) -> str:
+        return self._send(f"Plaudit could not process *{headline(meta)}*: {error}",
+                          {"event": "meeting.stuck", "meta": meta, "error": error})
+
+
+class EmailOutput:
+    """The minutes in the body, the full notes (minutes + transcript) as a Markdown attachment."""
+
+    def __init__(self, cfg: dict):
+        ec = cfg["outputs"]["email"]
+        self.to = [ec["to"]] if isinstance(ec["to"], str) else list(ec["to"] or [])
+        if not (ec.get("smtp_host") and self.to):
+            raise RuntimeError("outputs.email needs smtp_host and to")
+        self.host, self.port, self.tls = ec["smtp_host"], int(ec.get("smtp_port", 587)), ec.get("tls", "starttls")
+        self.user, self.password = secret(ec.get("user_env")), secret(ec.get("password_env"))
+        self.sender = ec.get("from") or self.user or f"plaudit@{self.host}"
+
+    def _send(self, subject: str, body: str, attachment: str | None = None) -> str:
+        msg = EmailMessage()
+        msg["Subject"], msg["From"], msg["To"] = subject, self.sender, ", ".join(self.to)
+        msg.set_content(body)
+        if attachment:
+            msg.add_attachment(attachment.encode(), maintype="text", subtype="markdown", filename="notes.md")
+        with (smtplib.SMTP_SSL if self.tls == "ssl" else smtplib.SMTP)(self.host, self.port, timeout=60) as smtp:
+            if self.tls == "starttls":
+                smtp.starttls()
+            if self.user:
+                smtp.login(self.user, self.password or "")
+            smtp.send_message(msg)
+        return f"mailto:{self.to[0]}"
+
+    def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
+        return self._send(f"[Plaudit] {meta['title']} ({meta['date']})", f"{headline(meta, links)}\n\n{summary.strip()}\n",
+                          render_markdown(meta, summary, transcript, audio_link))
+
+    def publish_stuck(self, meta: dict, error: str) -> str:
+        return self._send(f"[Plaudit] stuck: {meta['title']} ({meta['date']})", f"Plaudit could not process {headline(meta)}: {error}\n")
 
 
 def create_notion_database(token: str, parent_page_id: str, title: str = "Meetings") -> str:
@@ -151,4 +218,8 @@ def build(cfg: dict) -> list:
         outs.append(MarkdownOutput(cfg))
     if cfg["outputs"].get("notion", {}).get("database_id"):
         outs.append(NotionOutput(cfg))
+    if cfg["outputs"].get("webhook", {}).get("url") or secret(cfg["outputs"].get("webhook", {}).get("url_env")):
+        outs.append(WebhookOutput(cfg))
+    if cfg["outputs"].get("email", {}).get("smtp_host"):
+        outs.append(EmailOutput(cfg))
     return outs
