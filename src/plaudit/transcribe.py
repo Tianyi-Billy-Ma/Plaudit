@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from . import device
 from .audio import read_pcm, slice_wav
 from .config import glossary, secret
 from .http import post_multipart
@@ -18,13 +19,13 @@ class QwenASRTranscriber:
     BATCH = 8
 
     def __init__(self, cfg: dict):
-        import torch
         from transformers import AutoModelForMultimodalLM, AutoProcessor
 
         self.cfg = cfg
         model_id = cfg["transcription"]["model"]
+        dev, dtype = device.pick()
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.model = AutoModelForMultimodalLM.from_pretrained(model_id, dtype=torch.bfloat16, device_map="cuda:0").eval()
+        self.model = AutoModelForMultimodalLM.from_pretrained(model_id, dtype=dtype).to(dev).eval()
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
         import numpy as np

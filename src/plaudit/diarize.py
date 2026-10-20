@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from . import device
 from .audio import duration_seconds
 from .models import Segment
 
@@ -32,7 +33,8 @@ class NemotronDiarizer:
         self.max_turn = cfg["diarization"]["max_turn_seconds"]
         model_id = cfg["diarization"]["model"]
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.model = AutoModelForAudioFrameClassification.from_pretrained(model_id, device_map="auto").eval()
+        # fp32 as before: the model is 0.5 GB, and .to() needs no accelerate, unlike device_map
+        self.model = AutoModelForAudioFrameClassification.from_pretrained(model_id).to(device.pick()[0]).eval()
 
     def diarize(self, wav: Path) -> list[Segment]:
         import numpy as np

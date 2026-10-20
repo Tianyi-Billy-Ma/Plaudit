@@ -16,7 +16,7 @@ sudo apt install rclone          # only for backups
 npm i -g @plaud-ai/cli           # only for the Plaud source (Node 22+), then `plaud login` once
 ```
 
-Python 3.10+. Local models need transformers 5.19+ and a CUDA GPU with roughly 5 GB free for the two models.
+Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly 6 GB of GPU or unified memory; see [Run on your hardware](#run-on-your-hardware).
 
 ## Configure
 
@@ -57,7 +57,7 @@ Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (
 | `outputs.email.user_env` / `password_env` | `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | environment variables with the SMTP login; leave the variables unset for a relay without authentication |
 | `backup.remote` | `null` | rclone remote and folder, e.g. `gdrive:Meetings`; finished jobs are copied to `YYYY/MM/<job id>/` and verified with `rclone check` |
 | `retention_days` | `7` | delete the local copy of a job this long after it finished, and only if its backup was verified |
-| `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this |
+| `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this (Linux only; macOS has no such figure and the guard is off there) |
 
 ### Secrets
 
@@ -95,6 +95,18 @@ Drop a file into the watched folder and it is queued on the next run. With the P
 - **Outputs are written once.** The Markdown file is never overwritten; a second meeting with the same title on the same day gets the job id appended. A Notion page is created once (the create call is not retried); if appending the transcript fails, the page keeps its minutes rather than being duplicated on the next attempt. The webhook and e-mail outputs run after the Markdown and Notion ones and include their links; a webhook POST is not retried, so a flaky receiver costs one notification, not a duplicate meeting page.
 - **Backup, then retention.** Every finished job without a verified backup is backed up on every later run until it passes. Local copies (converted audio removed, original audio, `notes.md`, `transcript.json`) are deleted only after a verified backup and `retention_days`.
 - **Dates are local.** Plaud reports times in UTC; Plaudit converts them to the machine's time zone (mount `/etc/localtime` into a container).
+
+## Run on your hardware
+
+Plaudit has no mandatory cloud service. Pick the profile that matches the machine you have:
+
+| Machine | Config | What runs where |
+| --- | --- | --- |
+| Linux box with an NVIDIA GPU (6 GB+ free) | `examples/plaudit.gpu.yaml` | Diarization and ASR locally on CUDA; summary through any OpenAI-compatible server on the same box (vLLM, Ollama, llama.cpp) or elsewhere |
+| Apple Silicon Mac (16 GB+) | `examples/plaudit.gpu.yaml` | Same two models locally on Metal (MPS) through PyTorch; summary via Ollama or LM Studio on the Mac. Slower than CUDA, and the memory guard is off, so run it when the Mac is otherwise idle |
+| CPU-only server, mini PC, small VPS | `examples/plaudit.api.yaml` | `transcription.backend: openai` sends each speaker turn to any `/v1/audio/transcriptions` server you run (whisper.cpp `server`, Speaches, vLLM with Qwen3-ASR, a GPU box on your LAN). Speaker labels still work without a GPU: `diarization: nemotron` is a 100M-parameter model that diarizes on a CPU in seconds (needs `pip install "plaudit[gpu]"`). With enough CPU and RAM (about 8 GB), `qwen_asr` runs on the CPU too, at roughly real time on a modern desktop CPU |
+
+The device is picked at start: CUDA, then MPS, then CPU (fp32). Measured on a CPU-only container: a 24 s two-voice clip diarized in 0.4 s and transcribed by Qwen3-ASR in 15 s, so a Raspberry Pi should send transcription over HTTP while a desktop CPU can keep everything local. Mixed setups work too, for example one GPU box serving transcription over HTTP for several small machines that only watch folders and publish notes. Windows is not supported (the queue lock uses `fcntl`); use WSL.
 
 ## Notion
 
