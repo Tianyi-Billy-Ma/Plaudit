@@ -28,6 +28,9 @@ def main(argv=None) -> int:
     one.add_argument("--title")
     one.add_argument("--date", default=date.today().isoformat())
     sub.add_parser("pull", help="only fetch new recordings into the queue")
+    sv = sub.add_parser("serve", help="HTTP upload endpoint into the watched folder (token from $PLAUDIT_UPLOAD_TOKEN)")
+    sv.add_argument("--host", default="0.0.0.0")
+    sv.add_argument("--port", type=int, help="default sources.upload.port (8787)")
     sub.add_parser("status", help="list queued jobs")
     ni = sub.add_parser("notion-init", help="create the Meetings database under a Notion page (token from $NOTION_TOKEN)")
     ni.add_argument("parent_page_id")
@@ -43,6 +46,11 @@ def main(argv=None) -> int:
         if not token:
             ap.error(f"set ${cfg['outputs']['notion']['token_env']} first")
         print(create_notion_database(token, args.parent_page_id, args.title))
+        return 0
+    if args.cmd == "serve":
+        from .upload import serve
+
+        serve(cfg, args.host, args.port)
         return 0
     q = Queue(cfg)
     if args.cmd == "run":

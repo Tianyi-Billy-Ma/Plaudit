@@ -30,6 +30,9 @@ Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (
 | `sources.folder.path` | `~/plaudit/inbox` | watched folder; audio files (`.mp3 .wav .m4a .aac .ogg .opus .flac .mp4 .webm .wma`) are moved into the queue once they are at least 10 s old |
 | `sources.plaud.enabled` | `false` | fetch new Plaud recordings on every run (needs `plaud login`) |
 | `sources.plaud.lookback_days` | `7` | ignore recordings uploaded before this; clips under 60 s are ignored too, and both are remembered in `seen.json` so they are never re-checked |
+| `sources.rclone.remote` | `null` | an rclone remote folder used as a drop box, e.g. `dropbox:Recordings` or `gdrive:Voice Memos`; on every run its audio files (top level) are **moved** into the watched folder and queued |
+| `sources.upload.port` | `8787` | port for `plaudit serve`, the HTTP upload endpoint (see Run) |
+| `sources.upload.token_env` | `PLAUDIT_UPLOAD_TOKEN` | environment variable holding the bearer token every upload must send; `serve` refuses to start without it |
 | `diarization.backend` | `none` | `nemotron` (local model) or `none` (one speaker, still chunked) |
 | `diarization.model` | `nvidia/Nemotron-3-Diarization` | Hugging Face id |
 | `diarization.max_turn_seconds` | `30` | longer speaker turns are split before transcription |
@@ -48,7 +51,8 @@ Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (
 | `outputs.notion.token_env` | `NOTION_TOKEN` | environment variable holding the Notion internal-integration token |
 | `outputs.notion.status_done` / `status_stuck` | `done` / `stuck` | option names to write into the database's `Status` column |
 | `outputs.webhook.url` | `null` | POST once per finished meeting (and once when a job gets stuck). For a Slack or Discord webhook URL, which is a secret, set `url_env` instead |
-| `outputs.webhook.url_env` | `PLAUDIT_WEBHOOK_URL` | environment variable holding the URL; wins over `url` |
+| `outputs.webhook.url_env` | `PLAUDIT_UPLOAD_TOKEN` | bearer token for `plaudit serve` |
+| `PLAUDIT_WEBHOOK_URL` | environment variable holding the URL; wins over `url` |
 | `outputs.webhook.format` | `generic` | `generic`: JSON `{event: meeting.done|meeting.stuck, meta, summary, links, audio_link, transcript}` for n8n, Zapier, Make, Home Assistant...; `slack` / `discord`: a message with title, links and minutes to an incoming webhook of that service |
 | `outputs.email.to` | `[]` | one address or a list; the minutes in the body, the full notes as a `notes.md` attachment; a stuck job sends a short alert |
 | `outputs.email.smtp_host` / `smtp_port` | `null` / `587` | setting `smtp_host` turns the e-mail output on |
@@ -68,6 +72,7 @@ Secrets never go in `plaudit.yaml`. Plaudit reads them from environment variable
 | `OPENAI_API_KEY` | the chat endpoint that writes the minutes |
 | `NOTION_TOKEN` | Notion internal integration, when `outputs.notion.database_id` is set |
 | `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in `examples/plaudit.api.yaml` |
+| `PLAUDIT_UPLOAD_TOKEN` | bearer token for `plaudit serve` |
 | `PLAUDIT_WEBHOOK_URL` | Slack / Discord incoming-webhook URL, when `outputs.webhook.format` is `slack` or `discord` |
 | `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | SMTP login, when `outputs.email.smtp_host` is set |
 
@@ -84,7 +89,12 @@ plaudit process meeting.m4a [--title T] [--date YYYY-MM-DD]   # one file now; pr
 plaudit notion-init <parent page id> [--title Meetings]       # create a Notion database for Plaudit, prints its id
 ```
 
-Drop a file into the watched folder and it is queued on the next run. With the Plaud source on, new recordings are fetched every run; Plaud has no webhook, so a timer is the only way. `plaudit process` takes the same lock as `run`, writes its result into the queue as a finished job (so it is backed up and retired like any other) and does not touch the file you gave it.
+```bash
+plaudit serve [--host 0.0.0.0] [--port 8787]     # HTTP upload endpoint; keep `plaudit run --loop` or the timer going as well
+curl -T meeting.m4a -H "Authorization: Bearer $PLAUDIT_UPLOAD_TOKEN" http://host:8787/meeting.m4a
+```
+
+Drop a file into the watched folder and it is queued on the next run. The same folder is where the other ways in land: `sources.rclone.remote` moves audio out of a cloud folder (anything rclone speaks: Dropbox, Google Drive, OneDrive, S3, Nextcloud; the usual route for a phone's voice-memo app) into it on every run, and `plaudit serve` writes files sent with `PUT`/`POST` into it (the URL path is the file name, the body is the file; an iOS Shortcut "Get Contents of URL" with the file as request body works). The endpoint speaks plain HTTP: put it behind your reverse proxy or a VPN for anything beyond a LAN. With the Plaud source on, new recordings are fetched every run; Plaud has no webhook, so a timer is the only way. `plaudit process` takes the same lock as `run`, writes its result into the queue as a finished job (so it is backed up and retired like any other) and does not touch the file you gave it.
 
 ## How it behaves
 

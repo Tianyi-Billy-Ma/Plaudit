@@ -15,6 +15,8 @@ DEFAULTS: dict = {
     "sources": {
         "folder": {"path": "~/plaudit/inbox"},
         "plaud": {"enabled": False, "lookback_days": 7},
+        "rclone": {"remote": None},  # e.g. "dropbox:Recordings": audio there is moved into the watched folder
+        "upload": {"port": 8787, "token_env": "PLAUDIT_UPLOAD_TOKEN"},  # `plaudit serve`
     },
     "diarization": {"backend": "none", "model": "nvidia/Nemotron-3-Diarization", "max_turn_seconds": 30},
     "transcription": {"backend": "qwen_asr", "model": "Qwen/Qwen3-ASR-1.7B-hf", "base_url": None},
