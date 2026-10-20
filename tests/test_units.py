@@ -480,3 +480,58 @@ def test_http_transcriber_sends_iso_language_code(cfg, monkeypatch):
     cfg["language"] = None
     transcribe.build(cfg).transcribe(Path("x.wav"), [Segment(0, 1, "Speaker 1")])
     assert "language" not in seen[1]
+
+
+def test_provider_preset_fills_only_what_the_user_left_unset(tmp_path):
+    from plaudit import config
+
+    (tmp_path / "plaudit.yaml").write_text(
+        "summary:\n  provider: anthropic\n  model: claude-sonnet-4-6\n  api_key_env: MY_KEY\n"
+        "transcription:\n  backend: openai\n  provider: groq\n  model: whisper-large-v3-turbo\n")
+    cfg = config.load(tmp_path / "plaudit.yaml")
+    assert cfg["summary"]["base_url"] == "https://api.anthropic.com/v1"
+    assert cfg["summary"]["api_key_env"] == "MY_KEY"  # explicit value wins over the preset
+    assert cfg["summary"]["temperature"] is None  # Claude rejects temperatures below 1
+    assert cfg["transcription"]["base_url"] == "https://api.groq.com/openai/v1"
+    assert cfg["transcription"]["api_key_env"] == "GROQ_API_KEY"
+    (tmp_path / "plaudit.yaml").write_text("summary:\n  provider: nope\n")
+    with pytest.raises(ValueError, match="nope"):
+        config.load(tmp_path / "plaudit.yaml")
+
+
+def test_temperature_is_sent_unless_null(cfg, monkeypatch):
+    from plaudit import summarize
+    from plaudit.summarize import Summarizer
+
+    sent = []
+    monkeypatch.setattr(summarize, "post_json", lambda url, payload, *a, **k: sent.append(payload) or {"choices": [{"message": {"content": "ok"}}]})
+    cfg["summary"].update(base_url="http://x")
+    Summarizer(cfg)._chat_uncached("s", "u")
+    cfg["summary"]["temperature"] = None
+    Summarizer(cfg)._chat_uncached("s", "u")
+    assert sent[0]["temperature"] == 0.2 and "temperature" not in sent[1]
+
+
+def test_whisper_backend_maps_language_and_joins_segments(cfg, clip, monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from plaudit import audio, transcribe
+
+    calls = []
+
+    class FakeModel:
+        def __init__(self, model):
+            calls.append(model)
+
+        def transcribe(self, clip, **kw):
+            calls.append(kw)
+            return iter([types.SimpleNamespace(text=" hello "), types.SimpleNamespace(text="world")]), None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeModel))
+    cfg["language"] = "Chinese"
+    cfg["transcription"].update(backend="whisper", model="turbo")
+    wav = audio.to_wav16k(clip, tmp_path / "a.wav")
+    turns = transcribe.build(cfg).transcribe(wav, [Segment(0.0, 1.0, "Speaker 1")])
+    assert turns[0].text == "hello world"
+    assert calls[0] == "turbo" and calls[1]["language"] == "zh"

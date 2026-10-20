@@ -11,6 +11,7 @@ Plaudit is not affiliated with Plaud. It reads Plaud recordings only through the
 ```bash
 pip install plaudit              # or: uv tool install plaudit / pipx install plaudit / uvx plaudit
 pip install "plaudit[gpu]"       # adds transformers, torch, numpy, librosa for the local models
+pip install "plaudit[whisper]"   # adds faster-whisper for local Whisper on CPU or CUDA
 sudo apt install ffmpeg          # required (ffmpeg and ffprobe); brew install ffmpeg on a Mac
 sudo apt install rclone          # only for backups
 npm i -g @plaud-ai/cli           # only for the Plaud source (Node 22+), then `plaud login` once
@@ -35,13 +36,16 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `diarization.backend` | `none` | `nemotron` (local model; 100M parameters, so it also runs on a CPU in seconds, which gives a box without a GPU speaker labels while transcription goes over HTTP) or `none` (one speaker, still chunked) |
 | `diarization.model` | `nvidia/Nemotron-3-Diarization` | Hugging Face id |
 | `diarization.max_turn_seconds` | `30` | longer speaker turns are split before transcription |
-| `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers) or `openai` (any `/v1/audio/transcriptions` endpoint) |
-| `transcription.model` | `Qwen/Qwen3-ASR-1.7B-hf` | Hugging Face id, or the model name the HTTP endpoint expects |
+| `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers), `whisper` (local, through faster-whisper) or `openai` (any `/v1/audio/transcriptions` endpoint) |
+| `transcription.model` | `Qwen/Qwen3-ASR-1.7B-hf` | Hugging Face id, a Whisper size (`turbo`, `large-v3`) or path, or the model name the HTTP endpoint expects |
+| `transcription.provider` | unset | `openai` backend only: `openai` or `groq` fills `base_url` and `api_key_env` (see [Providers](#providers)) |
 | `transcription.base_url` | `null` | `openai` backend only, e.g. `http://localhost:8080/v1` |
 | `transcription.api_key_env` | unset | `openai` backend only: name of the environment variable holding the bearer token |
+| `summary.provider` | unset | a name from [Providers](#providers); fills `base_url`, `api_key_env` and `temperature` unless you set them yourself |
 | `summary.base_url` | `null` | `/v1` of any OpenAI-compatible chat endpoint; `null` disables the summary (the notes then hold the transcript only) |
 | `summary.model` | `glm-5.3-flash` | model name sent in the request |
 | `summary.api_key_env` | `OPENAI_API_KEY` | environment variable holding the bearer token |
+| `summary.temperature` | `0.2` | sent as-is; `null` sends none (Claude 4.7 and later reject values below 1) |
 | `summary.language` | `zh` | language of the minutes: `zh` (摘要 / 决定 / 行动项, English terms kept) or `en` (Summary / Decisions / Action items) |
 | `summary.chunk_chars` | `12000` | transcripts longer than this are summarised in parts and the parts merged; no single request is longer than this |
 | `summary.reasoning_effort` | unset | sent as-is in the request; `none` switches thinking off for reasoning models (GLM, Qwen3, DeepSeek), which otherwise think for minutes per part and may return nothing. Leave unset for models that reject the field |
@@ -61,13 +65,37 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `retention_days` | `7` | delete the local copy of a job this long after it finished, and only if its backup was verified |
 | `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this (Linux only; macOS has no such figure and the guard is off there) |
 
+### Providers
+
+Pick the summary model with `summary.provider` + `summary.model`; the preset fills the endpoint and the name of the key variable. Any other OpenAI-compatible server works with `base_url` instead of `provider`.
+
+| `provider` | Example `model` | Key variable | Notes |
+| --- | --- | --- | --- |
+| `ollama` | `qwen3:8b` | none | local, `http://localhost:11434/v1`; set `reasoning_effort: none` for thinking models |
+| `vllm` | the served model id | none | local, `http://localhost:8000/v1` |
+| `lmstudio` | the loaded model id | none | local, `http://localhost:1234/v1` |
+| `openai` | `gpt-5-mini` | `OPENAI_API_KEY` | |
+| `anthropic` | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | through Anthropic's OpenAI-compatible endpoint (documented as a test path); `temperature` is dropped, `reasoning_effort` ignored |
+| `gemini` | `gemini-2.5-flash` | `GEMINI_API_KEY` | `reasoning_effort: none` only on 2.5 models |
+| `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` | |
+| `groq` | `llama-3.3-70b-versatile` | `GROQ_API_KEY` | also transcription: `transcription: {backend: openai, provider: groq, model: whisper-large-v3-turbo}` |
+| `openrouter` | any `vendor/model` id | `OPENROUTER_API_KEY` | one key for many vendors |
+
+Transcription:
+
+| `backend` | Runs | Notes |
+| --- | --- | --- |
+| `qwen_asr` | locally, GPU | best for Chinese and English mixed in one sentence; the default |
+| `whisper` | locally, CPU or CUDA, `pip install "plaudit[whisper]"` | faster-whisper; `model: turbo` or `large-v3`; weaker on code-switching, set `language` for single-language meetings |
+| `openai` | any `/v1/audio/transcriptions` server | whisper.cpp server, vLLM, [speaches](https://github.com/speaches-ai/speaches), OpenAI (`provider: openai`, `model: gpt-4o-transcribe`) or Groq (`provider: groq`) |
+
 ### Secrets
 
 Secrets never go in `plaudit.yaml`. Plaudit reads them from environment variables, and fills in any that are missing from a `.env` file next to `plaudit.yaml` (`KEY=value` lines, `export` prefix and quotes allowed, `chmod 600`). The variable names are the `api_key_env` / `token_env` values above:
 
 | Variable | Used for |
 | --- | --- |
-| `OPENAI_API_KEY` | the chat endpoint that writes the minutes |
+| `OPENAI_API_KEY` | the chat endpoint that writes the minutes (a `summary.provider` preset names its own variable, see [Providers](#providers)) |
 | `NOTION_TOKEN` | Notion internal integration, when `outputs.notion.database_id` is set |
 | `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in the `--api` config |
 | `PLAUDIT_WEBHOOK_URL` | Slack / Discord incoming-webhook URL, when `outputs.webhook.format` is `slack` or `discord` |
@@ -103,13 +131,13 @@ Drop a file into the watched folder and it is queued on the next run. With the P
 
 ## Run on your hardware
 
-Plaudit has no mandatory cloud service. Pick the profile that matches the machine you have:
+Plaudit has no mandatory cloud service. Pick the profile that matches the machine you have; the model and provider choices for each stage are in [Providers](#providers):
 
 | Machine | Config | What runs where |
 | --- | --- | --- |
 | Linux box with an NVIDIA GPU (6 GB+ free) | `examples/plaudit.gpu.yaml` | Diarization and ASR locally on CUDA; summary through any OpenAI-compatible server on the same box (vLLM, Ollama, llama.cpp) or elsewhere |
 | Apple Silicon Mac (16 GB+) | `examples/plaudit.gpu.yaml` | Same two models locally on Metal (MPS) through PyTorch; summary via Ollama or LM Studio on the Mac. Slower than CUDA, and the memory guard is off, so run it when the Mac is otherwise idle |
-| CPU-only server, mini PC, small VPS | `examples/plaudit.api.yaml` | `transcription.backend: openai` sends each speaker turn to any `/v1/audio/transcriptions` server you run (whisper.cpp `server`, Speaches, vLLM with Qwen3-ASR, a GPU box on your LAN). Speaker labels still work without a GPU: `diarization: nemotron` is a 100M-parameter model that diarizes on a CPU in seconds (needs `pip install "plaudit[gpu]"`). With enough CPU and RAM (about 8 GB), `qwen_asr` runs on the CPU too, at roughly real time on a modern desktop CPU |
+| CPU-only server, mini PC, small VPS | `examples/plaudit.api.yaml` | `transcription.backend: whisper` runs faster-whisper on the CPU without torch (`pip install "plaudit[whisper]"`), or `transcription.backend: openai` sends each speaker turn to any `/v1/audio/transcriptions` server you run (whisper.cpp `server`, Speaches, vLLM with Qwen3-ASR, a GPU box on your LAN). Speaker labels still work without a GPU: `diarization: nemotron` is a 100M-parameter model that diarizes on a CPU in seconds (needs `pip install "plaudit[gpu]"`). With enough CPU and RAM (about 8 GB), `qwen_asr` runs on the CPU too, at roughly real time on a modern desktop CPU |
 
 The device is picked at start: CUDA, then MPS, then CPU (fp32). Measured on a CPU-only container: a 24 s two-voice clip diarized in 0.4 s and transcribed by Qwen3-ASR in 15 s, so a Raspberry Pi should send transcription over HTTP while a desktop CPU can keep everything local. Mixed setups work too, for example one GPU box serving transcription over HTTP for several small machines that only watch folders and publish notes. Windows is not supported (the queue lock uses `fcntl`); use WSL.
 
