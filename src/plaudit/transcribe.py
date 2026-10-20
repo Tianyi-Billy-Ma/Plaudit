@@ -4,12 +4,14 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from . import device
 from .audio import read_pcm, slice_wav
 from .config import glossary, secret
 from .http import post_multipart
 from .models import Segment
 
 log = logging.getLogger(__name__)
+LANGUAGE_CODES = {"Chinese": "zh", "English": "en"}  # config uses Qwen's names; HTTP endpoints want ISO codes
 
 
 class QwenASRTranscriber:
@@ -18,13 +20,13 @@ class QwenASRTranscriber:
     BATCH = 8
 
     def __init__(self, cfg: dict):
-        import torch
         from transformers import AutoModelForMultimodalLM, AutoProcessor
 
         self.cfg = cfg
         model_id = cfg["transcription"]["model"]
+        dev, dtype = device.pick()
         self.processor = AutoProcessor.from_pretrained(model_id)
-        self.model = AutoModelForMultimodalLM.from_pretrained(model_id, dtype=torch.bfloat16, device_map="cuda:0").eval()
+        self.model = AutoModelForMultimodalLM.from_pretrained(model_id, dtype=dtype).to(dev).eval()
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
         import numpy as np
@@ -63,6 +65,8 @@ class OpenAICompatTranscriber:
         if key := secret(tc.get("api_key_env")):
             self.headers["Authorization"] = f"Bearer {key}"
         self.prompt = ", ".join(glossary(cfg))
+        # Whisper-style endpoints take ISO codes; without one they guess per request and may switch script or translate
+        self.language = LANGUAGE_CODES.get(cfg["language"], cfg["language"])
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
         pcm = read_pcm(wav)
@@ -70,6 +74,8 @@ class OpenAICompatTranscriber:
             fields = {"model": self.model, "response_format": "json"}
             if self.prompt:
                 fields["prompt"] = self.prompt
+            if self.language:
+                fields["language"] = self.language
             resp = post_multipart(self.url, fields, "file", "turn.wav", slice_wav(pcm, t.start, t.end), self.headers)
             t.text = resp.get("text", "").strip()
         return turns

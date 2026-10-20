@@ -18,7 +18,7 @@ plaudit init                     # writes ~/plaudit/plaudit.yaml, inbox/ and glo
 plaudit process meeting.m4a      # first result: minutes printed, notes in ~/plaudit/data/notes
 ```
 
-Python 3.10+. Local models need transformers 5.19+ and a CUDA GPU with roughly 5 GB free for the two models. Until the first PyPI release, install from git: `pip install "plaudit[gpu] @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"`.
+Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly 6 GB of GPU or unified memory; see [Run on your hardware](#run-on-your-hardware). Until the first PyPI release, install from git: `pip install "plaudit[gpu] @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"`.
 
 ## Configure
 
@@ -28,11 +28,11 @@ Python 3.10+. Local models need transformers 5.19+ and a CUDA GPU with roughly 5
 | --- | --- | --- |
 | `data_dir` | `~/plaudit/data` | queue state: `inbox/` (downloaded audio), `jobs/` (one JSON per job), `done/` (one folder per finished job), `seen.json` (Plaud ids already handled), `plaudit.lock` |
 | `glossary` | `~/plaudit/glossary.txt` | one term per line, `#` comments; read fresh for every job and given to the ASR model and the summariser |
-| `language` | `null` | ASR language hint: `null` auto-detects, or `Chinese` / `English` |
+| `language` | `null` | ASR language hint: `null` auto-detects, or `Chinese` / `English` (sent to HTTP endpoints as `zh` / `en`) |
 | `sources.folder.path` | `~/plaudit/inbox` | watched folder; audio files (`.mp3 .wav .m4a .aac .ogg .opus .flac .mp4 .webm .wma`) are moved into the queue once they are at least 10 s old |
 | `sources.plaud.enabled` | `false` | fetch new Plaud recordings on every run (needs `plaud login`) |
 | `sources.plaud.lookback_days` | `7` | ignore recordings uploaded before this; clips under 60 s are ignored too, and both are remembered in `seen.json` so they are never re-checked |
-| `diarization.backend` | `none` | `nemotron` (local model) or `none` (one speaker, still chunked) |
+| `diarization.backend` | `none` | `nemotron` (local model; 100M parameters, so it also runs on a CPU in seconds, which gives a box without a GPU speaker labels while transcription goes over HTTP) or `none` (one speaker, still chunked) |
 | `diarization.model` | `nvidia/Nemotron-3-Diarization` | Hugging Face id |
 | `diarization.max_turn_seconds` | `30` | longer speaker turns are split before transcription |
 | `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers) or `openai` (any `/v1/audio/transcriptions` endpoint) |
@@ -59,7 +59,7 @@ Python 3.10+. Local models need transformers 5.19+ and a CUDA GPU with roughly 5
 | `outputs.email.user_env` / `password_env` | `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | environment variables with the SMTP login; leave the variables unset for a relay without authentication |
 | `backup.remote` | `null` | rclone remote and folder, e.g. `gdrive:Meetings`; finished jobs are copied to `YYYY/MM/<job id>/` and verified with `rclone check` |
 | `retention_days` | `7` | delete the local copy of a job this long after it finished, and only if its backup was verified |
-| `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this |
+| `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this (Linux only; macOS has no such figure and the guard is off there) |
 
 ### Secrets
 
@@ -99,6 +99,18 @@ Drop a file into the watched folder and it is queued on the next run. With the P
 - **Backup, then retention.** Every finished job without a verified backup is backed up on every later run until it passes. Local copies (converted audio removed, original audio, `notes.md`, `transcript.json`) are deleted only after a verified backup and `retention_days`.
 - **Dates are local.** Plaud reports times in UTC; Plaudit converts them to the machine's time zone (mount `/etc/localtime` into a container).
 
+## Run on your hardware
+
+Plaudit has no mandatory cloud service. Pick the profile that matches the machine you have:
+
+| Machine | Config | What runs where |
+| --- | --- | --- |
+| Linux box with an NVIDIA GPU (6 GB+ free) | `examples/plaudit.gpu.yaml` | Diarization and ASR locally on CUDA; summary through any OpenAI-compatible server on the same box (vLLM, Ollama, llama.cpp) or elsewhere |
+| Apple Silicon Mac (16 GB+) | `examples/plaudit.gpu.yaml` | Same two models locally on Metal (MPS) through PyTorch; summary via Ollama or LM Studio on the Mac. Slower than CUDA, and the memory guard is off, so run it when the Mac is otherwise idle |
+| CPU-only server, mini PC, small VPS | `examples/plaudit.api.yaml` | `transcription.backend: openai` sends each speaker turn to any `/v1/audio/transcriptions` server you run (whisper.cpp `server`, Speaches, vLLM with Qwen3-ASR, a GPU box on your LAN). Speaker labels still work without a GPU: `diarization: nemotron` is a 100M-parameter model that diarizes on a CPU in seconds (needs `pip install "plaudit[gpu]"`). With enough CPU and RAM (about 8 GB), `qwen_asr` runs on the CPU too, at roughly real time on a modern desktop CPU |
+
+The device is picked at start: CUDA, then MPS, then CPU (fp32). Measured on a CPU-only container: a 24 s two-voice clip diarized in 0.4 s and transcribed by Qwen3-ASR in 15 s, so a Raspberry Pi should send transcription over HTTP while a desktop CPU can keep everything local. Mixed setups work too, for example one GPU box serving transcription over HTTP for several small machines that only watch folders and publish notes. Windows is not supported (the queue lock uses `fcntl`); use WSL.
+
 ## Notion
 
 `plaudit notion-init <parent page id>` creates a database with the columns Plaudit writes: `Name` (title), `Date` (date), `Duration (min)` (number), `Source` (text), `Status` (select: `done`, `stuck`). It prints the database id for `outputs.notion.database_id`; share the parent page with your integration first.
@@ -120,7 +132,7 @@ pytest -q
 
 Releases: `git tag v0.1.1 && git push --tags` builds the package and publishes it to PyPI through trusted publishing (`.github/workflows/release.yml`, no token stored); bump `version` in `pyproject.toml` and `src/plaudit/__init__.py` first.
 
-The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
+The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
 
 ## License
 

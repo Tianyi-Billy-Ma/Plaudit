@@ -8,7 +8,7 @@ sources:
     path: ~/plaudit/inbox
 
 diarization:
-  backend: none
+  backend: none   # nemotron works on the CPU too (pip install "plaudit[gpu]"): speaker labels without a GPU
 
 transcription:
   backend: openai

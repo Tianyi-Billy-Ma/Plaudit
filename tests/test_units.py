@@ -449,3 +449,18 @@ def test_init_writes_starter_config_once(tmp_path, capsys):
     assert main(["-c", str(cfg), "init"]) == 0
     assert cfg.read_text() == "data_dir: keep\n"  # never overwrites
     assert "leaving it alone" in capsys.readouterr().out
+
+
+def test_http_transcriber_sends_iso_language_code(cfg, monkeypatch):
+    from plaudit import transcribe
+
+    cfg["transcription"].update(backend="openai", base_url="http://x/v1")
+    cfg["language"] = "Chinese"
+    seen = []
+    monkeypatch.setattr(transcribe, "post_multipart", lambda url, fields, *a, **k: seen.append(fields) or {"text": " 你好 "})
+    monkeypatch.setattr(transcribe, "read_pcm", lambda wav: b"\0" * 32000)
+    turns = transcribe.build(cfg).transcribe(Path("x.wav"), [Segment(0, 1, "Speaker 1")])
+    assert seen[0]["language"] == "zh" and turns[0].text == "你好"
+    cfg["language"] = None
+    transcribe.build(cfg).transcribe(Path("x.wav"), [Segment(0, 1, "Speaker 1")])
+    assert "language" not in seen[1]

@@ -15,7 +15,7 @@ services:
       - ${HOME}/.config/rclone:/root/.config/rclone:ro   # read-only so token refreshes do not leave a root-owned file
     mem_limit: 7g
     memswap_limit: 7g
-    deploy:
+    deploy:                 # delete this block on a machine without an NVIDIA GPU (CPU/API profile)
       resources:
         reservations:
           devices:

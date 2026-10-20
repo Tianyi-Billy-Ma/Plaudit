@@ -17,9 +17,12 @@ log = logging.getLogger(__name__)
 STUCK_AFTER = timedelta(hours=24)
 
 
-def mem_available_gb(meminfo: str | None = None) -> float:
-    text = meminfo if meminfo is not None else Path("/proc/meminfo").read_text()
-    for line in text.splitlines():
+def mem_available_gb(meminfo: str | None = None, path: Path = Path("/proc/meminfo")) -> float:
+    if meminfo is None:
+        if not path.exists():  # shortcut: no memory guard outside Linux (macOS has no MemAvailable), add psutil if a Mac swaps
+            return float("inf")
+        meminfo = path.read_text()
+    for line in meminfo.splitlines():
         if line.startswith("MemAvailable:"):
             return int(line.split()[1]) / 1024 / 1024
     return float("inf")
