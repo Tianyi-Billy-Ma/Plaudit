@@ -26,11 +26,11 @@ Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (
 | --- | --- | --- |
 | `data_dir` | `~/plaudit/data` | queue state: `inbox/` (downloaded audio), `jobs/` (one JSON per job), `done/` (one folder per finished job), `seen.json` (Plaud ids already handled), `plaudit.lock` |
 | `glossary` | `~/plaudit/glossary.txt` | one term per line, `#` comments; read fresh for every job and given to the ASR model and the summariser |
-| `language` | `null` | ASR language hint: `null` auto-detects, or `Chinese` / `English` |
+| `language` | `null` | ASR language hint: `null` auto-detects, or `Chinese` / `English` (sent to HTTP endpoints as `zh` / `en`) |
 | `sources.folder.path` | `~/plaudit/inbox` | watched folder; audio files (`.mp3 .wav .m4a .aac .ogg .opus .flac .mp4 .webm .wma`) are moved into the queue once they are at least 10 s old |
 | `sources.plaud.enabled` | `false` | fetch new Plaud recordings on every run (needs `plaud login`) |
 | `sources.plaud.lookback_days` | `7` | ignore recordings uploaded before this; clips under 60 s are ignored too, and both are remembered in `seen.json` so they are never re-checked |
-| `diarization.backend` | `none` | `nemotron` (local model) or `none` (one speaker, still chunked) |
+| `diarization.backend` | `none` | `nemotron` (local model; 100M parameters, so it also runs on a CPU in seconds, which gives a box without a GPU speaker labels while transcription goes over HTTP) or `none` (one speaker, still chunked) |
 | `diarization.model` | `nvidia/Nemotron-3-Diarization` | Hugging Face id |
 | `diarization.max_turn_seconds` | `30` | longer speaker turns are split before transcription |
 | `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers) or `openai` (any `/v1/audio/transcriptions` endpoint) |
@@ -127,7 +127,7 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
+The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
 
 ## License
 

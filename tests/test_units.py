@@ -437,3 +437,18 @@ def test_email_output(cfg, monkeypatch):
     body, attachment = msg.iter_parts()
     assert "https://notion.so/p" in body.get_content() and "- x" in body.get_content()
     assert attachment.get_filename() == "notes.md" and "[00:00:00] A: hi" in attachment.get_content()
+
+
+def test_http_transcriber_sends_iso_language_code(cfg, monkeypatch):
+    from plaudit import transcribe
+
+    cfg["transcription"].update(backend="openai", base_url="http://x/v1")
+    cfg["language"] = "Chinese"
+    seen = []
+    monkeypatch.setattr(transcribe, "post_multipart", lambda url, fields, *a, **k: seen.append(fields) or {"text": " 你好 "})
+    monkeypatch.setattr(transcribe, "read_pcm", lambda wav: b"\0" * 32000)
+    turns = transcribe.build(cfg).transcribe(Path("x.wav"), [Segment(0, 1, "Speaker 1")])
+    assert seen[0]["language"] == "zh" and turns[0].text == "你好"
+    cfg["language"] = None
+    transcribe.build(cfg).transcribe(Path("x.wav"), [Segment(0, 1, "Speaker 1")])
+    assert "language" not in seen[1]

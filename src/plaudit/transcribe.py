@@ -11,6 +11,7 @@ from .http import post_multipart
 from .models import Segment
 
 log = logging.getLogger(__name__)
+LANGUAGE_CODES = {"Chinese": "zh", "English": "en"}  # config uses Qwen's names; HTTP endpoints want ISO codes
 
 
 class QwenASRTranscriber:
@@ -64,6 +65,8 @@ class OpenAICompatTranscriber:
         if key := secret(tc.get("api_key_env")):
             self.headers["Authorization"] = f"Bearer {key}"
         self.prompt = ", ".join(glossary(cfg))
+        # Whisper-style endpoints take ISO codes; without one they guess per request and may switch script or translate
+        self.language = LANGUAGE_CODES.get(cfg["language"], cfg["language"])
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
         pcm = read_pcm(wav)
@@ -71,6 +74,8 @@ class OpenAICompatTranscriber:
             fields = {"model": self.model, "response_format": "json"}
             if self.prompt:
                 fields["prompt"] = self.prompt
+            if self.language:
+                fields["language"] = self.language
             resp = post_multipart(self.url, fields, "file", "turn.wav", slice_wav(pcm, t.start, t.end), self.headers)
             t.text = resp.get("text", "").strip()
         return turns
