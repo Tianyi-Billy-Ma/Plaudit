@@ -5,9 +5,8 @@ import json
 import logging
 from pathlib import Path
 
-from . import audio, config, diarize, outputs, transcribe
+from . import audio, config, diarize, outputs, summarize, transcribe
 from .models import Segment, Transcript
-from .summarize import Summarizer
 
 log = logging.getLogger(__name__)
 
@@ -19,7 +18,7 @@ class Pipeline:
         self.cfg = cfg
         self.diarizer = diarizer or diarize.build(cfg)
         self.transcriber = transcriber or transcribe.build(cfg)
-        self.summarizer = summarizer or (Summarizer(cfg) if cfg["summary"]["base_url"] else None)
+        self.summarizer = summarizer or summarize.build(cfg)
         self.sinks = outputs.build(cfg) if sinks is None else sinks
 
     def process(self, src: Path, meta: dict, workdir: Path, audio_link: str | None = None) -> dict:
