@@ -8,7 +8,7 @@ sources:
     path: ~/plaudit/inbox
 
 diarization:
-  backend: none
+  backend: none   # nemotron works on the CPU too (pip install "plaudit[gpu]"): speaker labels without a GPU
 
 transcription:
   backend: openai
@@ -17,10 +17,10 @@ transcription:
   api_key_env: PLAUDIT_ASR_API_KEY
 
 summary:
-  base_url: http://localhost:11434/v1  # e.g. Ollama
+  provider: ollama   # or vllm, lmstudio, openai, anthropic, gemini, deepseek, groq, openrouter; or set base_url yourself
   model: qwen3:8b
-  api_key_env: OPENAI_API_KEY
   language: en
+  reasoning_effort: none
 
 outputs:
   markdown:

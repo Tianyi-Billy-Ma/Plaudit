@@ -19,25 +19,40 @@ DEFAULTS: dict = {
         "upload": {"port": 8787, "token_env": "PLAUDIT_UPLOAD_TOKEN"},  # `plaudit serve`
     },
     "diarization": {"backend": "none", "model": "nvidia/Nemotron-3-Diarization", "max_turn_seconds": 30},
-    "transcription": {"backend": "qwen_asr", "model": "Qwen/Qwen3-ASR-1.7B-hf", "base_url": None},
+    "transcription": {"backend": "qwen_asr", "model": "Qwen/Qwen3-ASR-1.7B-hf", "provider": None, "base_url": None,
+                      "api_key_env": None},
     "summary": {
+        "provider": None,  # a PROVIDERS name: fills base_url / api_key_env (/ temperature) unless set explicitly
         "base_url": None,
         "model": "glm-5.3-flash",
         "api_key_env": "OPENAI_API_KEY",
         "language": "zh",
         "chunk_chars": 12000,
+        "temperature": 0.2,  # null sends none (Claude 4.7+ rejects values below 1)
         "reasoning_effort": None,  # "none" switches a reasoning model's thinking off (GLM, Qwen3, DeepSeek)
     },
     "outputs": {
         "markdown": {"dir": "~/plaudit/data/notes"},
         "notion": {"database_id": None, "token_env": "NOTION_TOKEN"},
-        "webhook": {"url": None, "url_env": "PLAUDIT_WEBHOOK_URL", "format": "generic"},  # generic | slack | discord
-        "email": {"to": [], "smtp_host": None, "smtp_port": 587, "tls": "starttls",  # starttls | ssl | none
-                  "from": None, "user_env": "PLAUDIT_SMTP_USER", "password_env": "PLAUDIT_SMTP_PASSWORD"},
+        "webhook": {"url": None, "url_env": "PLAUDIT_WEBHOOK_URL"},  # JSON POST for n8n, Zapier, Home Assistant
+        "notify": {"urls": [], "urls_env": "PLAUDIT_NOTIFY_URLS"},  # Apprise URLs: Slack, Discord, Teams, e-mail...
     },
     "backup": {"remote": None},  # e.g. "gdrive:Meetings"; None = off
     "retention_days": 7,
     "min_free_mem_gb": 8,
+}
+
+# OpenAI-compatible endpoints. The hosted ones also need the named key in the environment; the local servers none.
+PROVIDERS: dict[str, dict] = {
+    "openai": {"base_url": "https://api.openai.com/v1", "api_key_env": "OPENAI_API_KEY"},
+    "anthropic": {"base_url": "https://api.anthropic.com/v1", "api_key_env": "ANTHROPIC_API_KEY", "temperature": None},
+    "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "api_key_env": "GEMINI_API_KEY"},
+    "deepseek": {"base_url": "https://api.deepseek.com/v1", "api_key_env": "DEEPSEEK_API_KEY"},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "api_key_env": "GROQ_API_KEY"},
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "api_key_env": "OPENROUTER_API_KEY"},
+    "ollama": {"base_url": "http://localhost:11434/v1", "api_key_env": None},
+    "vllm": {"base_url": "http://localhost:8000/v1", "api_key_env": None},
+    "lmstudio": {"base_url": "http://localhost:1234/v1", "api_key_env": None},
 }
 
 
@@ -48,17 +63,40 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+def config_path(arg: str | os.PathLike | None = None) -> Path:
+    return Path(arg or os.environ.get("PLAUDIT_CONFIG", "~/plaudit/plaudit.yaml")).expanduser()
+
+
 def load(path: str | os.PathLike | None = None) -> dict:
-    path = Path(path or os.environ.get("PLAUDIT_CONFIG", "~/plaudit/plaudit.yaml")).expanduser()
+    path = config_path(path)
     user = yaml.safe_load(path.read_text()) if path.exists() else {}
+    _refuse_secrets(user or {})
     load_env(path.with_name(".env"))
     cfg = _merge(copy.deepcopy(DEFAULTS), user or {})  # nested dicts are shared otherwise and edits leak between loads
+    for section in ("summary", "transcription"):
+        if name := cfg[section]["provider"]:
+            if name not in PROVIDERS:
+                raise ValueError(f"{section}.provider {name!r} unknown; one of: {', '.join(PROVIDERS)}")
+            given = (user or {}).get(section) or {}
+            cfg[section].update({k: v for k, v in PROVIDERS[name].items() if k in cfg[section] and k not in given})
     for key in ("data_dir", "glossary"):
         cfg[key] = str(Path(cfg[key]).expanduser())
     cfg["sources"]["folder"]["path"] = str(Path(cfg["sources"]["folder"]["path"]).expanduser())
     if cfg["outputs"].get("markdown"):
         cfg["outputs"]["markdown"]["dir"] = str(Path(cfg["outputs"]["markdown"]["dir"]).expanduser())
     return cfg
+
+
+def _refuse_secrets(d: dict, prefix: str = "") -> None:
+    """A secret typed into plaudit.yaml would be silently ignored (or, for a webhook URL, backed up with the notes),
+    so the file is rejected instead and the message says where the value belongs."""
+    for k, v in d.items():
+        hook_url = k == "url" and isinstance(v, str) and ("hooks.slack.com/" in v or "discord.com/api/webhooks/" in v)
+        if k in ("api_key", "token", "password") or hook_url:
+            raise ValueError(f"{prefix}{k}: secrets never go in plaudit.yaml. Set {prefix}{k}_env to a variable name "
+                             f"and put the value in the environment or in the .env file next to plaudit.yaml")
+        if isinstance(v, dict):
+            _refuse_secrets(v, f"{prefix}{k}.")
 
 
 def load_env(path: Path) -> None:

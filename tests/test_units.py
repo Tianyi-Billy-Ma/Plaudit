@@ -162,6 +162,7 @@ def test_markdown_output_never_overwrites(cfg, tmp_path):
     a = out.publish({**meta, "id": "a"}, "first", t)
     b = out.publish({**meta, "id": "b"}, "second", t)
     assert a != b and "first" in Path(a).read_text() and "second" in Path(b).read_text()
+    assert Path(a).read_text().startswith('---\ntitle: "Lab"\ndate: "2026-10-11"\nduration_min: 1\nsource: "manual"\n---\n\n# Lab\n')
 
 
 def test_config_allows_notion_only(tmp_path):
@@ -344,6 +345,21 @@ def test_reasoning_effort_is_sent_only_when_configured(cfg, monkeypatch):
     assert "reasoning_effort" not in sent[0] and sent[1]["reasoning_effort"] == "none"
 
 
+def test_config_refuses_secrets_in_yaml(tmp_path):
+    import pytest
+    from plaudit import config
+
+    p = tmp_path / "plaudit.yaml"
+    for body, key in (("outputs:\n  notion:\n    token: secret_x\n", "outputs.notion.token"),
+                      ("summary:\n  api_key: sk-x\n", "summary.api_key"),
+                      ("outputs:\n  webhook:\n    url: https://hooks.slack.com/services/T/B/x\n", "outputs.webhook.url")):
+        p.write_text(body)
+        with pytest.raises(ValueError, match=key):
+            config.load(p)
+    p.write_text("outputs:\n  webhook:\n    url: https://n8n.example/hook\n")
+    assert config.load(p)["outputs"]["webhook"]["url"] == "https://n8n.example/hook"  # a plain URL is fine
+
+
 def test_dotenv_next_to_config_fills_missing_env_vars(tmp_path, monkeypatch):
     from plaudit import config
 
@@ -370,7 +386,7 @@ def test_process_command_output_joins_the_queue_as_done(cfg, clip, tmp_path, mon
     assert (Queue(cfg).done_dir / jobs[0]["id"] / clip.name).exists()  # the original audio is kept for the backup
 
 
-def test_webhook_output_formats_and_gets_earlier_links(cfg, clip, tmp_path, monkeypatch):
+def test_webhook_output_gets_earlier_links_and_hides_its_token(cfg, clip, tmp_path, monkeypatch):
     from conftest import FakeDiarizer, FakeSummarizer, FakeTranscriber
 
     from plaudit import outputs
@@ -378,15 +394,15 @@ def test_webhook_output_formats_and_gets_earlier_links(cfg, clip, tmp_path, monk
 
     sent = []
     monkeypatch.setattr(outputs, "post_json", lambda url, payload, *a, **k: sent.append((url, payload)) or {})
-    cfg["outputs"]["webhook"].update(url="https://hooks.example/x", format="slack")
+    cfg["outputs"]["webhook"]["url"] = "https://hooks.example/x?token=s3cret"
     pipe = Pipeline(cfg, diarizer=FakeDiarizer(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer(),
                     sinks=[outputs.MarkdownOutput(cfg), outputs.WebhookOutput(cfg)])
     r = pipe.process(clip, {"title": "Standup", "date": "2026-10-20", "source": "manual", "id": "j1"}, tmp_path / "w")
     url, payload = sent[0]
-    assert url == "https://hooks.example/x" and payload["text"].startswith("*Standup (2026-10-20, 0.1 min)\n")
-    assert r["links"][0] in payload["text"] and "## 摘要" in payload["text"]  # the Markdown path, then the minutes
+    assert url == "https://hooks.example/x?token=s3cret" and payload["event"] == "meeting.done"
+    assert payload["links"] == [r["links"][0]] and "## 摘要" in payload["summary"] and payload["transcript"]["segments"]
+    assert r["links"][1] == "webhook"  # the URL is a secret and links get logged and backed up
 
-    cfg["outputs"]["webhook"]["format"] = "generic"
     outputs.WebhookOutput(cfg).publish_stuck({"title": "t", "date": "d"}, "boom")
     assert sent[1][1] == {"event": "meeting.stuck", "meta": {"title": "t", "date": "d"}, "error": "boom"}
 
@@ -396,47 +412,112 @@ def test_webhook_output_formats_and_gets_earlier_links(cfg, clip, tmp_path, monk
     assert outputs.build(cfg)[1].url == "https://hooks.example/env"
 
 
-def test_email_output(cfg, monkeypatch):
+def test_notify_output_sends_through_apprise_with_masked_urls(cfg, monkeypatch):
+    import apprise
+
     from plaudit import outputs
     from plaudit.models import Transcript
 
-    class FakeSMTP:
-        calls = []
-
-        def __init__(self, host, port, timeout=0):
-            self.calls.append(("connect", host, port))
-
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *a):
-            pass
-
-        def starttls(self):
-            self.calls.append(("starttls",))
-
-        def login(self, user, password):
-            self.calls.append(("login", user, password))
-
-        def send_message(self, msg):
-            self.calls.append(("send", msg))
-
-    monkeypatch.setattr(outputs.smtplib, "SMTP", FakeSMTP)
-    monkeypatch.setenv("PLAUDIT_SMTP_USER", "me@example.com")
-    monkeypatch.setenv("PLAUDIT_SMTP_PASSWORD", "pw")
-    cfg["outputs"]["email"].update(to="you@example.com", smtp_host="smtp.example.com")
+    calls = []
+    monkeypatch.setattr(apprise.Apprise, "notify", lambda self, **kw: calls.append({**kw, "attached": Path(kw["attach"]).read_text() if kw["attach"] else None}) or True)
+    monkeypatch.setenv("PLAUDIT_NOTIFY_URLS", "mailto://me:pa55word@example.com?to=you@example.com discord://1234/abcdef")
+    cfg["outputs"]["notify"]["urls"] = ["ntfy://ntfy.sh/plaudit"]
     out = outputs.build(cfg)[-1]
-    assert isinstance(out, outputs.EmailOutput)
-    t = Transcript([Segment(0, 1, "A", "hi")])
-    assert out.publish({"title": "Standup", "date": "2026-10-20", "source": "manual", "duration_min": 1}, "## Summary\n- x", t,
-                       links=["https://notion.so/p"]) == "mailto:you@example.com"
-    kinds = [c[0] for c in FakeSMTP.calls]
-    assert kinds == ["connect", "starttls", "login", "send"] and FakeSMTP.calls[0][1:] == ("smtp.example.com", 587)
-    msg = FakeSMTP.calls[-1][1]
-    assert msg["Subject"] == "[Plaudit] Standup (2026-10-20)" and msg["From"] == "me@example.com" and msg["To"] == "you@example.com"
-    body, attachment = msg.iter_parts()
-    assert "https://notion.so/p" in body.get_content() and "- x" in body.get_content()
-    assert attachment.get_filename() == "notes.md" and "[00:00:00] A: hi" in attachment.get_content()
+    assert isinstance(out, outputs.NotifyOutput) and len(out.app) == 3
+    assert "pa55word" not in out.label and "abcdef" not in out.label and "ntfy.sh" in out.label
+
+    meta = {"title": "Standup", "date": "2026-10-20", "source": "manual", "duration_min": 1}
+    assert out.publish(meta, "## Summary\n- x", Transcript([Segment(0, 1, "A", "hi")]), links=["https://notion.so/p"]) == out.label
+    assert calls[0]["title"] == "Standup (2026-10-20, 1 min)" and calls[0]["body"] == "https://notion.so/p\n\n## Summary\n- x"
+    assert calls[0]["attached"].startswith("---\ntitle: \"Standup\"") and "[00:00:00] A: hi" in calls[0]["attached"]
+    out.publish_stuck(meta, "boom")
+    assert calls[1]["title"].startswith("Plaudit could not process Standup") and calls[1]["body"] == "boom" and calls[1]["attach"] is None
+
+    cfg["outputs"]["notify"]["urls"] = ["nonsense"]
+    with pytest.raises(RuntimeError):
+        outputs.NotifyOutput(cfg)
+
+
+def test_init_writes_starter_config_once(tmp_path, capsys):
+    from plaudit.cli import main
+
+    cfg = tmp_path / "plaudit.yaml"
+    assert main(["-c", str(cfg), "init", "--api"]) == 0
+    assert "backend: openai" in cfg.read_text()
+    cfg.write_text("data_dir: keep\n")
+    assert main(["-c", str(cfg), "init"]) == 0
+    assert cfg.read_text() == "data_dir: keep\n"  # never overwrites
+    assert "leaving it alone" in capsys.readouterr().out
+
+
+def test_http_transcriber_sends_iso_language_code(cfg, monkeypatch):
+    from plaudit import transcribe
+
+    cfg["transcription"].update(backend="openai", base_url="http://x/v1")
+    cfg["language"] = "Chinese"
+    seen = []
+    monkeypatch.setattr(transcribe, "post_multipart", lambda url, fields, *a, **k: seen.append(fields) or {"text": " 你好 "})
+    monkeypatch.setattr(transcribe, "read_pcm", lambda wav: b"\0" * 32000)
+    turns = transcribe.build(cfg).transcribe(Path("x.wav"), [Segment(0, 1, "Speaker 1")])
+    assert seen[0]["language"] == "zh" and turns[0].text == "你好"
+    cfg["language"] = None
+    transcribe.build(cfg).transcribe(Path("x.wav"), [Segment(0, 1, "Speaker 1")])
+    assert "language" not in seen[1]
+
+
+def test_provider_preset_fills_only_what_the_user_left_unset(tmp_path):
+    from plaudit import config
+
+    (tmp_path / "plaudit.yaml").write_text(
+        "summary:\n  provider: anthropic\n  model: claude-sonnet-4-6\n  api_key_env: MY_KEY\n"
+        "transcription:\n  backend: openai\n  provider: groq\n  model: whisper-large-v3-turbo\n")
+    cfg = config.load(tmp_path / "plaudit.yaml")
+    assert cfg["summary"]["base_url"] == "https://api.anthropic.com/v1"
+    assert cfg["summary"]["api_key_env"] == "MY_KEY"  # explicit value wins over the preset
+    assert cfg["summary"]["temperature"] is None  # Claude rejects temperatures below 1
+    assert cfg["transcription"]["base_url"] == "https://api.groq.com/openai/v1"
+    assert cfg["transcription"]["api_key_env"] == "GROQ_API_KEY"
+    (tmp_path / "plaudit.yaml").write_text("summary:\n  provider: nope\n")
+    with pytest.raises(ValueError, match="nope"):
+        config.load(tmp_path / "plaudit.yaml")
+
+
+def test_temperature_is_sent_unless_null(cfg, monkeypatch):
+    from plaudit import summarize
+    from plaudit.summarize import Summarizer
+
+    sent = []
+    monkeypatch.setattr(summarize, "post_json", lambda url, payload, *a, **k: sent.append(payload) or {"choices": [{"message": {"content": "ok"}}]})
+    cfg["summary"].update(base_url="http://x")
+    Summarizer(cfg)._chat_uncached("s", "u")
+    cfg["summary"]["temperature"] = None
+    Summarizer(cfg)._chat_uncached("s", "u")
+    assert sent[0]["temperature"] == 0.2 and "temperature" not in sent[1]
+
+
+def test_whisper_backend_maps_language_and_joins_segments(cfg, clip, monkeypatch, tmp_path):
+    import sys
+    import types
+
+    from plaudit import audio, transcribe
+
+    calls = []
+
+    class FakeModel:
+        def __init__(self, model):
+            calls.append(model)
+
+        def transcribe(self, clip, **kw):
+            calls.append(kw)
+            return iter([types.SimpleNamespace(text=" hello "), types.SimpleNamespace(text="world")]), None
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", types.SimpleNamespace(WhisperModel=FakeModel))
+    cfg["language"] = "Chinese"
+    cfg["transcription"].update(backend="whisper", model="turbo")
+    wav = audio.to_wav16k(clip, tmp_path / "a.wav")
+    turns = transcribe.build(cfg).transcribe(wav, [Segment(0.0, 1.0, "Speaker 1")])
+    assert turns[0].text == "hello world"
+    assert calls[0] == "turbo" and calls[1]["language"] == "zh"
 
 
 def test_rclone_source_moves_into_watched_folder(cfg, monkeypatch):
@@ -452,16 +533,16 @@ def test_rclone_source_moves_into_watched_folder(cfg, monkeypatch):
     assert "*.{aac,flac,m4a,mp3,mp4,ogg,opus,wav,webm,wma}" in calls[0]
 
 
-def test_upload_endpoint(cfg, monkeypatch):
+def test_upload_endpoint(cfg):
     import threading
     import urllib.error
     import urllib.request
-
-    from plaudit.upload import make_handler
     from http.server import ThreadingHTTPServer
 
+    from plaudit.upload import make_handler
+
     folder = Path(cfg["sources"]["folder"]["path"])
-    folder.mkdir()
+    folder.mkdir(exist_ok=True)
     srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(folder, "s3cret"))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{srv.server_address[1]}"

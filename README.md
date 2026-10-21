@@ -9,59 +9,85 @@ Plaudit is not affiliated with Plaud. It reads Plaud recordings only through the
 ## Install
 
 ```bash
-pip install "plaudit @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"          # core: watched folder, transcription over HTTP, Markdown/Notion output
-pip install "plaudit[gpu] @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"     # adds transformers, torch, numpy, librosa for the local models
-sudo apt install ffmpeg          # required (ffmpeg and ffprobe)
+pip install plaudit              # or: uv tool install plaudit / pipx install plaudit / uvx plaudit
+pip install "plaudit[notify]"    # adds Apprise for Slack, Discord, Teams, Telegram, e-mail... notifications
+pip install "plaudit[gpu]"       # adds transformers, torch, numpy, librosa for the local models
+pip install "plaudit[whisper]"   # adds faster-whisper for local Whisper on CPU or CUDA
+sudo apt install ffmpeg          # required (ffmpeg and ffprobe); brew install ffmpeg on a Mac
 sudo apt install rclone          # only for backups
 npm i -g @plaud-ai/cli           # only for the Plaud source (Node 22+), then `plaud login` once
+plaudit init                     # writes ~/plaudit/plaudit.yaml, inbox/ and glossary.txt (--api for the no-GPU config)
+plaudit process meeting.m4a      # first result: minutes printed, notes in ~/plaudit/data/notes
 ```
 
-Python 3.10+. Local models need transformers 5.19+ and a CUDA GPU with roughly 5 GB free for the two models.
+Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly 6 GB of GPU or unified memory; see [Run on your hardware](#run-on-your-hardware). Until the first PyPI release, install from git: `pip install "plaudit[gpu] @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"`.
 
 ## Configure
 
-Copy `examples/plaudit.gpu.yaml` (local models) or `examples/plaudit.api.yaml` (no GPU, transcription over HTTP) to `~/plaudit/plaudit.yaml` and edit it. Another location works with `plaudit -c path/plaudit.yaml` or `PLAUDIT_CONFIG=path/plaudit.yaml`. Every key is optional; the defaults are in `src/plaudit/config.py`.
+`plaudit init` writes the local-models config (`plaudit init --api` the no-GPU one, transcription over HTTP) to `~/plaudit/plaudit.yaml`; edit it. The two templates are `src/plaudit/examples/`. Another location works with `plaudit -c path/plaudit.yaml` or `PLAUDIT_CONFIG=path/plaudit.yaml`. Every key is optional; the defaults are in `src/plaudit/config.py`.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
 | `data_dir` | `~/plaudit/data` | queue state: `inbox/` (downloaded audio), `jobs/` (one JSON per job), `done/` (one folder per finished job), `seen.json` (Plaud ids already handled), `plaudit.lock` |
 | `glossary` | `~/plaudit/glossary.txt` | one term per line, `#` comments; read fresh for every job and given to the ASR model and the summariser |
-| `language` | `null` | ASR language hint: `null` auto-detects, or `Chinese` / `English` |
+| `language` | `null` | ASR language hint: `null` auto-detects, or `Chinese` / `English` (sent to HTTP endpoints as `zh` / `en`) |
 | `sources.folder.path` | `~/plaudit/inbox` | watched folder; audio files (`.mp3 .wav .m4a .aac .ogg .opus .flac .mp4 .webm .wma`) are moved into the queue once they are at least 10 s old |
 | `sources.plaud.enabled` | `false` | fetch new Plaud recordings on every run (needs `plaud login`) |
 | `sources.plaud.lookback_days` | `7` | ignore recordings uploaded before this; clips under 60 s are ignored too, and both are remembered in `seen.json` so they are never re-checked |
 | `sources.rclone.remote` | `null` | an rclone remote folder used as a drop box, e.g. `dropbox:Recordings` or `gdrive:Voice Memos`; on every run its audio files (top level) are **moved** into the watched folder and queued |
 | `sources.upload.port` | `8787` | port for `plaudit serve`, the HTTP upload endpoint (see Run) |
 | `sources.upload.token_env` | `PLAUDIT_UPLOAD_TOKEN` | environment variable holding the bearer token every upload must send; `serve` refuses to start without it |
-| `diarization.backend` | `none` | `nemotron` (local model) or `none` (one speaker, still chunked) |
+| `diarization.backend` | `none` | `nemotron` (local model; 100M parameters, so it also runs on a CPU in seconds, which gives a box without a GPU speaker labels while transcription goes over HTTP) or `none` (one speaker, still chunked) |
 | `diarization.model` | `nvidia/Nemotron-3-Diarization` | Hugging Face id |
 | `diarization.max_turn_seconds` | `30` | longer speaker turns are split before transcription |
-| `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers) or `openai` (any `/v1/audio/transcriptions` endpoint) |
-| `transcription.model` | `Qwen/Qwen3-ASR-1.7B-hf` | Hugging Face id, or the model name the HTTP endpoint expects |
+| `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers), `whisper` (local, through faster-whisper) or `openai` (any `/v1/audio/transcriptions` endpoint) |
+| `transcription.model` | `Qwen/Qwen3-ASR-1.7B-hf` | Hugging Face id, a Whisper size (`turbo`, `large-v3`) or path, or the model name the HTTP endpoint expects |
+| `transcription.provider` | unset | `openai` backend only: `openai` or `groq` fills `base_url` and `api_key_env` (see [Providers](#providers)) |
 | `transcription.base_url` | `null` | `openai` backend only, e.g. `http://localhost:8080/v1` |
 | `transcription.api_key_env` | unset | `openai` backend only: name of the environment variable holding the bearer token |
+| `summary.provider` | unset | a name from [Providers](#providers); fills `base_url`, `api_key_env` and `temperature` unless you set them yourself |
 | `summary.base_url` | `null` | `/v1` of any OpenAI-compatible chat endpoint; `null` disables the summary (the notes then hold the transcript only) |
 | `summary.model` | `glm-5.3-flash` | model name sent in the request |
 | `summary.api_key_env` | `OPENAI_API_KEY` | environment variable holding the bearer token |
+| `summary.temperature` | `0.2` | sent as-is; `null` sends none (Claude 4.7 and later reject values below 1) |
 | `summary.language` | `zh` | language of the minutes: `zh` (摘要 / 决定 / 行动项, English terms kept) or `en` (Summary / Decisions / Action items) |
 | `summary.chunk_chars` | `12000` | transcripts longer than this are summarised in parts and the parts merged; no single request is longer than this |
 | `summary.reasoning_effort` | unset | sent as-is in the request; `none` switches thinking off for reasoning models (GLM, Qwen3, DeepSeek), which otherwise think for minutes per part and may return nothing. Leave unset for models that reject the field |
-| `outputs.markdown.dir` | `~/plaudit/data/notes` | one `YYYY-MM-DD <title>.md` per meeting; `null` turns Markdown output off |
+| `outputs.markdown.dir` | `~/plaudit/data/notes` | one `YYYY-MM-DD <title>.md` per meeting, with YAML front matter (`title`, `date`, `duration_min`, `source`, `audio`) so an Obsidian or Logseq vault shows them as properties; `null` turns Markdown output off |
 | `outputs.notion.database_id` | `null` | set to publish one page per meeting into an existing database |
 | `outputs.notion.token_env` | `NOTION_TOKEN` | environment variable holding the Notion internal-integration token |
 | `outputs.notion.status_done` / `status_stuck` | `done` / `stuck` | option names to write into the database's `Status` column |
-| `outputs.webhook.url` | `null` | POST once per finished meeting (and once when a job gets stuck). For a Slack or Discord webhook URL, which is a secret, set `url_env` instead |
-| `outputs.webhook.url_env` | `PLAUDIT_UPLOAD_TOKEN` | bearer token for `plaudit serve` |
-| `PLAUDIT_WEBHOOK_URL` | environment variable holding the URL; wins over `url` |
-| `outputs.webhook.format` | `generic` | `generic`: JSON `{event: meeting.done|meeting.stuck, meta, summary, links, audio_link, transcript}` for n8n, Zapier, Make, Home Assistant...; `slack` / `discord`: a message with title, links and minutes to an incoming webhook of that service |
-| `outputs.email.to` | `[]` | one address or a list; the minutes in the body, the full notes as a `notes.md` attachment; a stuck job sends a short alert |
-| `outputs.email.smtp_host` / `smtp_port` | `null` / `587` | setting `smtp_host` turns the e-mail output on |
-| `outputs.email.tls` | `starttls` | `starttls` (port 587), `ssl` (port 465) or `none` (a local relay on port 25) |
-| `outputs.email.from` | sender login | `From:` address |
-| `outputs.email.user_env` / `password_env` | `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | environment variables with the SMTP login; leave the variables unset for a relay without authentication |
+| `outputs.webhook.url` | `null` | POST the whole result as JSON once per finished meeting (and once when a job gets stuck): `{event: meeting.done|meeting.stuck, meta, summary, links, audio_link, transcript}`, for n8n, Zapier, Make, Home Assistant... If the URL carries a token, set `url_env` instead |
+| `outputs.webhook.url_env` | `PLAUDIT_WEBHOOK_URL` | environment variable holding the URL; wins over `url` |
+| `outputs.notify.urls` | `[]` | [Apprise](https://github.com/caronc/apprise/wiki) URLs, one per destination: Slack, Discord, Microsoft Teams, Telegram, Matrix, Mattermost, Google Chat, e-mail (`mailto://`), ntfy, Pushover, Gotify, Signal and 100+ more. Each gets the title, the links and the minutes, plus the full notes as a `notes.md` attachment where the service allows; a stuck job sends a short alert. Needs `pip install 'plaudit[notify]'` |
+| `outputs.notify.urls_env` | `PLAUDIT_NOTIFY_URLS` | environment variable with more Apprise URLs, separated by spaces or commas; most URLs embed a token, so this is where they belong |
 | `backup.remote` | `null` | rclone remote and folder, e.g. `gdrive:Meetings`; finished jobs are copied to `YYYY/MM/<job id>/` and verified with `rclone check` |
 | `retention_days` | `7` | delete the local copy of a job this long after it finished, and only if its backup was verified |
-| `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this |
+| `min_free_mem_gb` | `8` | do not load the models while `MemAvailable` is below this (Linux only; macOS has no such figure and the guard is off there) |
+
+### Providers
+
+Pick the summary model with `summary.provider` + `summary.model`; the preset fills the endpoint and the name of the key variable. Any other OpenAI-compatible server works with `base_url` instead of `provider`.
+
+| `provider` | Example `model` | Key variable | Notes |
+| --- | --- | --- | --- |
+| `ollama` | `qwen3:8b` | none | local, `http://localhost:11434/v1`; set `reasoning_effort: none` for thinking models |
+| `vllm` | the served model id | none | local, `http://localhost:8000/v1` |
+| `lmstudio` | the loaded model id | none | local, `http://localhost:1234/v1` |
+| `openai` | `gpt-5-mini` | `OPENAI_API_KEY` | |
+| `anthropic` | `claude-sonnet-4-6` | `ANTHROPIC_API_KEY` | through Anthropic's OpenAI-compatible endpoint (documented as a test path); `temperature` is dropped, `reasoning_effort` ignored |
+| `gemini` | `gemini-2.5-flash` | `GEMINI_API_KEY` | `reasoning_effort: none` only on 2.5 models |
+| `deepseek` | `deepseek-chat` | `DEEPSEEK_API_KEY` | |
+| `groq` | `llama-3.3-70b-versatile` | `GROQ_API_KEY` | also transcription: `transcription: {backend: openai, provider: groq, model: whisper-large-v3-turbo}` |
+| `openrouter` | any `vendor/model` id | `OPENROUTER_API_KEY` | one key for many vendors |
+
+Transcription:
+
+| `backend` | Runs | Notes |
+| --- | --- | --- |
+| `qwen_asr` | locally, GPU | best for Chinese and English mixed in one sentence; the default |
+| `whisper` | locally, CPU or CUDA, `pip install "plaudit[whisper]"` | faster-whisper; `model: turbo` or `large-v3`; weaker on code-switching, set `language` for single-language meetings |
+| `openai` | any `/v1/audio/transcriptions` server | whisper.cpp server, vLLM, [speaches](https://github.com/speaches-ai/speaches), OpenAI (`provider: openai`, `model: gpt-4o-transcribe`) or Groq (`provider: groq`) |
 
 ### Secrets
 
@@ -69,28 +95,28 @@ Secrets never go in `plaudit.yaml`. Plaudit reads them from environment variable
 
 | Variable | Used for |
 | --- | --- |
-| `OPENAI_API_KEY` | the chat endpoint that writes the minutes |
+| `OPENAI_API_KEY` | the chat endpoint that writes the minutes (a `summary.provider` preset names its own variable, see [Providers](#providers)) |
 | `NOTION_TOKEN` | Notion internal integration, when `outputs.notion.database_id` is set |
-| `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in `examples/plaudit.api.yaml` |
+| `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in the `--api` config |
 | `PLAUDIT_UPLOAD_TOKEN` | bearer token for `plaudit serve` |
-| `PLAUDIT_WEBHOOK_URL` | Slack / Discord incoming-webhook URL, when `outputs.webhook.format` is `slack` or `discord` |
-| `PLAUDIT_SMTP_USER` / `PLAUDIT_SMTP_PASSWORD` | SMTP login, when `outputs.email.smtp_host` is set |
+| `PLAUDIT_WEBHOOK_URL` | a webhook URL that carries a token |
+| `PLAUDIT_NOTIFY_URLS` | Apprise URLs with tokens or passwords, e.g. `discord://<id>/<token> mailto://user:pass@gmail.com` |
 
-The Plaud CLI keeps its own login in `~/.plaud`, rclone its own in `~/.config/rclone/rclone.conf`.
+A key named `api_key`, `token` or `password` in `plaudit.yaml`, or a Slack/Discord webhook URL under `url`, makes Plaudit refuse to start with a message naming the `_env` key to use instead. Output links that are logged, kept in the job file and backed up never contain the webhook URL.
+
+The Plaud CLI keeps its own login in `~/.plaud`, rclone its own in `~/.config/rclone/rclone.conf`. Plaudit sends nothing anywhere you did not configure: the Docker image sets `HF_HUB_DISABLE_TELEMETRY=1`, so model downloads from Hugging Face carry no usage telemetry either; set it yourself when running outside Docker.
 
 ## Run
 
 ```bash
+plaudit init [--api]         # starter config, inbox/ and glossary.txt; never overwrites
 plaudit run                  # pull new recordings, process the queue once, back up, exit
 plaudit run --loop 300       # the same every 5 minutes; models are reloaded each cycle so memory is free in between
 plaudit pull                 # only fetch new recordings into the queue
 plaudit status               # one line per job: id, waiting / delayed / running / done / stuck / retired, title, last error
 plaudit process meeting.m4a [--title T] [--date YYYY-MM-DD]   # one file now; prints the minutes and the output links
 plaudit notion-init <parent page id> [--title Meetings]       # create a Notion database for Plaudit, prints its id
-```
-
-```bash
-plaudit serve [--host 0.0.0.0] [--port 8787]     # HTTP upload endpoint; keep `plaudit run --loop` or the timer going as well
+plaudit serve [--host 0.0.0.0] [--port 8787]                  # HTTP upload endpoint into the watched folder; keep `run --loop` or the timer going as well
 curl -T meeting.m4a -H "Authorization: Bearer $PLAUDIT_UPLOAD_TOKEN" http://host:8787/meeting.m4a
 ```
 
@@ -102,9 +128,21 @@ Drop a file into the watched folder and it is queued on the next run. The same f
 - **Per speaker turn.** Audio is transcribed turn by turn, at most `max_turn_seconds` each, never as one long tensor. Diarization streams the recording in fixed chunks, so memory stays flat for multi-hour files.
 - **Retries, with backoff.** A failed job goes back to `waiting` and is retried after 10 min, then 20, 40, up to 2 h between attempts. The transcript is saved as `transcript.json` after diarization and ASR, so a retry after a summary or output failure skips straight to the summary. After 24 h of failures the job is marked `stuck`; if the Notion output is on, a stub page with status `stuck` and the error is created. A run killed mid-job (out of memory, reboot) counts as a failed attempt, and a job whose third attempt ends that way is marked `stuck` at once. There is no paid fallback.
 - **Summary of long meetings.** The transcript is split into parts of `chunk_chars`, each part is summarised, and the part minutes are merged in rounds until one set remains. Every answer is cached in `summary-cache.json` in the job folder (key: model + prompts), so a dropped connection or a retry does not repeat the calls already made. If the model returns no text (a reasoning model that spent its budget thinking, or a reply cut off after minutes), the part is halved and tried again; set `summary.reasoning_effort: none` for such models.
-- **Outputs are written once.** The Markdown file is never overwritten; a second meeting with the same title on the same day gets the job id appended. A Notion page is created once (the create call is not retried); if appending the transcript fails, the page keeps its minutes rather than being duplicated on the next attempt. The webhook and e-mail outputs run after the Markdown and Notion ones and include their links; a webhook POST is not retried, so a flaky receiver costs one notification, not a duplicate meeting page.
+- **Outputs are written once.** The Markdown file is never overwritten; a second meeting with the same title on the same day gets the job id appended. A Notion page is created once (the create call is not retried); if appending the transcript fails, the page keeps its minutes rather than being duplicated on the next attempt. The webhook and notify outputs run after the Markdown and Notion ones and include their links; a webhook POST is not retried and a failed notification is logged rather than raised, so a flaky receiver costs one notification, not a duplicate meeting page. Links that are stored or logged never contain a token: the webhook is recorded as `webhook` and notify links are Apprise's masked form.
 - **Backup, then retention.** Every finished job without a verified backup is backed up on every later run until it passes. Local copies (converted audio removed, original audio, `notes.md`, `transcript.json`) are deleted only after a verified backup and `retention_days`.
 - **Dates are local.** Plaud reports times in UTC; Plaudit converts them to the machine's time zone (mount `/etc/localtime` into a container).
+
+## Run on your hardware
+
+Plaudit has no mandatory cloud service. Pick the profile that matches the machine you have; the model and provider choices for each stage are in [Providers](#providers):
+
+| Machine | Config | What runs where |
+| --- | --- | --- |
+| Linux box with an NVIDIA GPU (6 GB+ free) | `examples/plaudit.gpu.yaml` | Diarization and ASR locally on CUDA; summary through any OpenAI-compatible server on the same box (vLLM, Ollama, llama.cpp) or elsewhere |
+| Apple Silicon Mac (16 GB+) | `examples/plaudit.gpu.yaml` | Same two models locally on Metal (MPS) through PyTorch; summary via Ollama or LM Studio on the Mac. Slower than CUDA, and the memory guard is off, so run it when the Mac is otherwise idle |
+| CPU-only server, mini PC, small VPS | `examples/plaudit.api.yaml` | `transcription.backend: whisper` runs faster-whisper on the CPU without torch (`pip install "plaudit[whisper]"`), or `transcription.backend: openai` sends each speaker turn to any `/v1/audio/transcriptions` server you run (whisper.cpp `server`, Speaches, vLLM with Qwen3-ASR, a GPU box on your LAN). Speaker labels still work without a GPU: `diarization: nemotron` is a 100M-parameter model that diarizes on a CPU in seconds (needs `pip install "plaudit[gpu]"`). With enough CPU and RAM (about 8 GB), `qwen_asr` runs on the CPU too, at roughly real time on a modern desktop CPU |
+
+The device is picked at start: CUDA, then MPS, then CPU (fp32). Measured on a CPU-only container: a 24 s two-voice clip diarized in 0.4 s and transcribed by Qwen3-ASR in 15 s, so a Raspberry Pi should send transcription over HTTP while a desktop CPU can keep everything local. Mixed setups work too, for example one GPU box serving transcription over HTTP for several small machines that only watch folders and publish notes. Windows is not supported (the queue lock uses `fcntl`); use WSL.
 
 ## Notion
 
@@ -114,9 +152,9 @@ An existing database works too. Columns are matched by name and type and missing
 
 ## Docker and systemd
 
-`Dockerfile` builds an image with ffmpeg, rclone, Node 22, the Plaud CLI and the `gpu` extras. The default base image is the aarch64 vLLM image (DGX Spark / GB10); on x86_64 pass `--build-arg BASE=vllm/vllm-openai:v0.29.0`, and for the CPU/API mode `--build-arg BASE=python:3.12-slim --build-arg EXTRAS=`. The image reads `/plaudit/plaudit.yaml` and expects these mounts: `/plaudit` (config, glossary, data), `/root/.cache/huggingface` (models), `/root/.plaud` (Plaud login), `/root/.config/rclone` (read-only), `/etc/localtime` (read-only).
+`Dockerfile` builds an image with ffmpeg, rclone, Node 22, the Plaud CLI and the `gpu` and `notify` extras. The default base image is the aarch64 vLLM image (DGX Spark / GB10); on x86_64 pass `--build-arg BASE=vllm/vllm-openai:v0.29.0`, and for the CPU/API mode `--build-arg BASE=python:3.12-slim --build-arg EXTRAS=notify`. The image reads `/plaudit/plaudit.yaml` and expects these mounts: `/plaudit` (config, glossary, data), `/root/.cache/huggingface` (models), `/root/.plaud` (Plaud login), `/root/.config/rclone` (read-only), `/etc/localtime` (read-only).
 
-`docker-compose.yml` runs one container per `docker compose run --rm plaudit`; `deploy/systemd/plaudit.service` and `plaudit.timer` start one such container every 5 minutes as a systemd user unit, with a hard memory cap and an 8 h limit per run (a 2 h recording with a slow summariser needs about 3.5 h). The unit sources `~/.config/secrets.env` in a shell and passes `OPENAI_API_KEY` and `NOTION_TOKEN` into the container; a `.env` next to `plaudit.yaml` inside the mounted folder works as well. Copy the two unit files to `~/.config/systemd/user/` and run `systemctl --user enable --now plaudit.timer`; stop everything with `systemctl --user disable --now plaudit.timer`.
+`docker-compose.yml` runs one container per `docker compose run --rm plaudit`; `deploy/systemd/plaudit.service` and `plaudit.timer` start one such container every 5 minutes as a systemd user unit, with a hard memory cap and an 8 h limit per run (a 2 h recording with a slow summariser needs about 3.5 h). The unit sources `~/.config/secrets.env` in a shell and passes the variables from the table above into the container (unset ones are skipped); a `.env` next to `plaudit.yaml` inside the mounted folder works as well. Copy the two unit files to `~/.config/systemd/user/` and run `systemctl --user enable --now plaudit.timer`; stop everything with `systemctl --user disable --now plaudit.timer`.
 
 ## Development
 
@@ -125,7 +163,9 @@ pip install -e ".[dev]"
 pytest -q
 ```
 
-The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
+Releases: `git tag v0.1.1 && git push --tags` builds the package and publishes it to PyPI through trusted publishing (`.github/workflows/release.yml`, no token stored); bump `version` in `pyproject.toml` and `src/plaudit/__init__.py` first.
+
+The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
 
 ## License
 

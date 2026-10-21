@@ -1,11 +1,18 @@
-"""Where results land: a Markdown folder, a Notion database (one page per meeting), a webhook (generic JSON,
-Slack or Discord) and/or an e-mail. The notifying outputs run last and receive the links the others produced."""
+"""Where results land: a Markdown folder, a Notion database (one page per meeting), a generic JSON webhook and/or
+notifications through Apprise (Slack, Discord, Teams, Telegram, e-mail...). The notifying outputs run last and
+receive the links the others produced."""
 from __future__ import annotations
 
+import json
 import logging
-import smtplib
-from email.message import EmailMessage
+import re
+import tempfile
 from pathlib import Path
+
+try:
+    import apprise  # optional: pip install plaudit[notify]
+except ImportError:  # pragma: no cover
+    apprise = None
 
 from .config import secret
 from .http import get_json, post_json
@@ -16,10 +23,11 @@ NOTION = "https://api.notion.com/v1"
 
 
 def render_markdown(meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None) -> str:
-    head = [f"# {meta['title']}", "", f"- Date: {meta['date']}", f"- Duration: {meta['duration_min']} min",
-            f"- Source: {meta['source']} {meta.get('source_id', '')}".rstrip()]
-    if audio_link:
-        head.append(f"- Audio: {audio_link}")
+    # YAML front matter: Obsidian and Logseq show it as note properties. json.dumps gives a valid YAML scalar.
+    props = {"title": meta["title"], "date": meta["date"], "duration_min": meta["duration_min"],
+             "source": f"{meta['source']} {meta.get('source_id', '')}".strip(), "audio": audio_link}
+    head = ["---", *(f"{k}: {json.dumps(v, ensure_ascii=False)}" for k, v in props.items() if v is not None), "---", "",
+            f"# {meta['title']}"]
     return "\n".join(head) + "\n\n" + summary.strip() + "\n\n## Transcript\n\n" + transcript.as_text() + "\n"
 
 
@@ -106,63 +114,60 @@ def headline(meta: dict, links=()) -> str:
 
 
 class WebhookOutput:
-    """One POST per finished (or stuck) meeting. `generic` sends the whole result as JSON for n8n, Zapier, Make,
-    Home Assistant...; `slack` and `discord` send a message to an incoming webhook of that service."""
+    """One POST of the whole result as JSON per finished (or stuck) meeting, for n8n, Zapier, Make, Home Assistant...
+    For a chat service use outputs.notify instead."""
 
     def __init__(self, cfg: dict):
         wc = cfg["outputs"]["webhook"]
-        self.url = secret(wc.get("url_env")) or wc.get("url")  # Slack/Discord webhook URLs are secrets
-        self.format = wc.get("format", "generic")
-        if not self.url or self.format not in ("generic", "slack", "discord"):
-            raise RuntimeError("outputs.webhook needs a url (or url_env) and format generic|slack|discord")
+        self.url = secret(wc.get("url_env")) or wc.get("url")  # the URL may carry a token
+        if not self.url:
+            raise RuntimeError("outputs.webhook needs a url or url_env")
 
-    def _send(self, text: str, event: dict) -> str:
-        payload = {"slack": {"text": text}, "discord": {"content": text[:2000]}}.get(self.format, event)
-        post_json(self.url, payload, retries=1)  # a notification is not worth a duplicate on retry
-        return self.url
+    def _send(self, event: dict) -> str:
+        post_json(self.url, event, retries=1)  # a notification is not worth a duplicate on retry
+        return "webhook"  # not the URL: links are logged, kept in the job file and backed up
 
     def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
-        text = f"*{headline(meta, links)}*\n\n{summary.strip()}"
-        return self._send(text, {"event": "meeting.done", "meta": meta, "summary": summary, "links": list(links),
-                                 "audio_link": audio_link, "transcript": transcript.to_dict()})
+        return self._send({"event": "meeting.done", "meta": meta, "summary": summary, "links": list(links),
+                           "audio_link": audio_link, "transcript": transcript.to_dict()})
 
     def publish_stuck(self, meta: dict, error: str) -> str:
-        return self._send(f"Plaudit could not process *{headline(meta)}*: {error}",
-                          {"event": "meeting.stuck", "meta": meta, "error": error})
+        return self._send({"event": "meeting.stuck", "meta": meta, "error": error})
 
 
-class EmailOutput:
-    """The minutes in the body, the full notes (minutes + transcript) as a Markdown attachment."""
+class NotifyOutput:
+    """The minutes to Slack, Discord, Teams, Telegram, Matrix, e-mail, ntfy... through Apprise: one URL per
+    destination (https://github.com/caronc/apprise/wiki). URLs carry tokens, so they normally come from the
+    environment; the link Plaudit records is Apprise's masked form."""
 
     def __init__(self, cfg: dict):
-        ec = cfg["outputs"]["email"]
-        self.to = [ec["to"]] if isinstance(ec["to"], str) else list(ec["to"] or [])
-        if not (ec.get("smtp_host") and self.to):
-            raise RuntimeError("outputs.email needs smtp_host and to")
-        self.host, self.port, self.tls = ec["smtp_host"], int(ec.get("smtp_port", 587)), ec.get("tls", "starttls")
-        self.user, self.password = secret(ec.get("user_env")), secret(ec.get("password_env"))
-        self.sender = ec.get("from") or self.user or f"plaudit@{self.host}"
+        if apprise is None:
+            raise RuntimeError("outputs.notify needs Apprise: pip install 'plaudit[notify]'")
+        nc = cfg["outputs"]["notify"]
+        self.app = apprise.Apprise()
+        for url in list(nc.get("urls") or []) + re.split(r"[\s,]+", secret(nc.get("urls_env")) or ""):
+            if url and not self.app.add(url):
+                raise RuntimeError(f"outputs.notify: Apprise rejected a {url.split(':')[0]}:// URL")
+        self.label = ", ".join(self.app.urls(privacy=True))
 
-    def _send(self, subject: str, body: str, attachment: str | None = None) -> str:
-        msg = EmailMessage()
-        msg["Subject"], msg["From"], msg["To"] = subject, self.sender, ", ".join(self.to)
-        msg.set_content(body)
-        if attachment:
-            msg.add_attachment(attachment.encode(), maintype="text", subtype="markdown", filename="notes.md")
-        with (smtplib.SMTP_SSL if self.tls == "ssl" else smtplib.SMTP)(self.host, self.port, timeout=60) as smtp:
-            if self.tls == "starttls":
-                smtp.starttls()
-            if self.user:
-                smtp.login(self.user, self.password or "")
-            smtp.send_message(msg)
-        return f"mailto:{self.to[0]}"
+    def _send(self, title: str, body: str, notes: str | None = None) -> str:
+        with tempfile.TemporaryDirectory() as d:  # attachments are passed by path
+            attach = None
+            if notes:
+                attach = str(Path(d) / "notes.md")
+                Path(attach).write_text(notes)
+            ok = self.app.notify(title=title, body=body, body_format=apprise.NotifyFormat.MARKDOWN, attach=attach)
+        if not ok:  # logged, not raised: a retry would duplicate the Markdown/Notion outputs for a lost notification
+            log.error("notification failed for %s", self.label)
+        return self.label
 
     def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
-        return self._send(f"[Plaudit] {meta['title']} ({meta['date']})", f"{headline(meta, links)}\n\n{summary.strip()}\n",
+        return self._send(headline(meta), "".join(f"{l}\n" for l in links) + "\n" + summary.strip(),
                           render_markdown(meta, summary, transcript, audio_link))
 
     def publish_stuck(self, meta: dict, error: str) -> str:
-        return self._send(f"[Plaudit] stuck: {meta['title']} ({meta['date']})", f"Plaudit could not process {headline(meta)}: {error}\n")
+        return self._send(f"Plaudit could not process {headline(meta)}", error)
+
 
 
 def create_notion_database(token: str, parent_page_id: str, title: str = "Meetings") -> str:
@@ -220,6 +225,6 @@ def build(cfg: dict) -> list:
         outs.append(NotionOutput(cfg))
     if cfg["outputs"].get("webhook", {}).get("url") or secret(cfg["outputs"].get("webhook", {}).get("url_env")):
         outs.append(WebhookOutput(cfg))
-    if cfg["outputs"].get("email", {}).get("smtp_host"):
-        outs.append(EmailOutput(cfg))
+    if cfg["outputs"].get("notify", {}).get("urls") or secret(cfg["outputs"].get("notify", {}).get("urls_env")):
+        outs.append(NotifyOutput(cfg))
     return outs

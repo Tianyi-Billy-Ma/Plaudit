@@ -5,6 +5,7 @@ import logging
 import shutil
 import sys
 import time
+from importlib import resources
 from datetime import date, datetime
 from pathlib import Path
 
@@ -32,12 +33,16 @@ def main(argv=None) -> int:
     sv.add_argument("--host", default="0.0.0.0")
     sv.add_argument("--port", type=int, help="default sources.upload.port (8787)")
     sub.add_parser("status", help="list queued jobs")
+    init = sub.add_parser("init", help="write a starter plaudit.yaml, inbox/ and glossary.txt (never overwrites)")
+    init.add_argument("--api", action="store_true", help="the no-GPU config (transcription and summary over HTTP)")
     ni = sub.add_parser("notion-init", help="create the Meetings database under a Notion page (token from $NOTION_TOKEN)")
     ni.add_argument("parent_page_id")
     ni.add_argument("--title", default="Meetings")
     args = ap.parse_args(argv)
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if args.cmd == "init":
+        return init_config(config.config_path(args.config), "api" if args.api else "gpu")
     cfg = config.load(args.config)
     if args.cmd == "notion-init":
         from .outputs import create_notion_database
@@ -85,6 +90,25 @@ def main(argv=None) -> int:
         q.retire()
     print(result["summary"] or result["transcript"].as_text())
     print("\n".join(result["links"]))
+    return 0
+
+
+def init_config(path: Path, flavour: str) -> int:
+    if path.exists():
+        print(f"{path} exists, leaving it alone")
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(resources.files("plaudit.examples").joinpath(f"plaudit.{flavour}.yaml").read_text())
+        print(f"wrote {path}")
+    cfg = config.load(path)
+    Path(cfg["sources"]["folder"]["path"]).expanduser().mkdir(parents=True, exist_ok=True)
+    glossary = Path(cfg["glossary"]).expanduser()
+    if not glossary.exists():
+        glossary.write_text("# one term per line, given to the ASR model and the summariser\n")
+    for tool in ("ffmpeg", "ffprobe"):
+        if not shutil.which(tool):
+            print(f"warning: {tool} not found on PATH; install ffmpeg before processing audio")
+    print(f"edit {path}, then: plaudit process meeting.m4a  (or drop files into {cfg['sources']['folder']['path']} and run: plaudit run)")
     return 0
 
 

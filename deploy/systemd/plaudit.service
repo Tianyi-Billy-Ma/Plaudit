@@ -11,7 +11,8 @@ TimeoutStartSec=8h
 WorkingDirectory=%h/plaudit
 # Sourced by a shell, not EnvironmentFile=: systemd rejects `export KEY=value` lines and logs them, secret and all.
 ExecStart=/bin/bash -c 'set -a; . %h/.config/secrets.env; set +a; exec /usr/bin/docker run --rm --gpus all \
-  --memory=7g --memory-swap=7g -e OPENAI_API_KEY -e NOTION_TOKEN \
+  --memory=7g --memory-swap=7g -e OPENAI_API_KEY -e NOTION_TOKEN -e PLAUDIT_ASR_API_KEY \
+  -e PLAUDIT_WEBHOOK_URL -e PLAUDIT_NOTIFY_URLS \
   -v %h/plaudit:/plaudit -v %h/.plaud:/root/.plaud -v %h/.config/rclone:/root/.config/rclone:ro \
   -v %h/.cache/huggingface:/root/.cache/huggingface -v /etc/localtime:/etc/localtime:ro \
   plaudit:0.1.0 run'

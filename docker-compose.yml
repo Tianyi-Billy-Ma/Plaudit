@@ -4,9 +4,12 @@ services:
   plaudit:
     build: .
     image: plaudit:0.1.0
-    environment:
+    environment:                             # only the ones set in the caller's environment are passed
       - OPENAI_API_KEY
       - NOTION_TOKEN
+      - PLAUDIT_ASR_API_KEY
+      - PLAUDIT_WEBHOOK_URL
+      - PLAUDIT_NOTIFY_URLS
     volumes:
       - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface   # shared Hugging Face model cache
@@ -15,7 +18,7 @@ services:
       - ${HOME}/.config/rclone:/root/.config/rclone:ro   # read-only so token refreshes do not leave a root-owned file
     mem_limit: 7g
     memswap_limit: 7g
-    deploy:
+    deploy:                 # delete this block on a machine without an NVIDIA GPU (CPU/API profile)
       resources:
         reservations:
           devices:

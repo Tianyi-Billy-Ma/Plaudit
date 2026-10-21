@@ -40,13 +40,10 @@ outputs:
     token_env: NOTION_TOKEN
     # status_done: Done       # option names when the database has its own Status column
     # status_stuck: WIP
-  # webhook:                # one POST per meeting: generic JSON, or a Slack / Discord message
-  #   url_env: PLAUDIT_WEBHOOK_URL
-  #   format: slack         # generic | slack | discord
-  # email:                  # the minutes by e-mail, full notes attached
-  #   to: [you@example.com]
-  #   smtp_host: smtp.example.com
-  #   smtp_port: 587        # tls: starttls (587) | ssl (465) | none; login from $PLAUDIT_SMTP_USER / $PLAUDIT_SMTP_PASSWORD
+  # webhook:                # one JSON POST per meeting (n8n, Zapier, Home Assistant...)
+  #   url: https://n8n.example/webhook/plaudit   # or url_env: PLAUDIT_WEBHOOK_URL when the URL carries a token
+  # notify:                 # Slack, Discord, Teams, Telegram, e-mail... as Apprise URLs (pip install 'plaudit[notify]')
+  #   urls: [ntfy://ntfy.sh/plaudit]              # URLs with tokens go in $PLAUDIT_NOTIFY_URLS, not here
 
 backup:
   remote: gdrive:Meetings  # rclone remote; null to disable. Files land in YYYY/MM/<job>/
