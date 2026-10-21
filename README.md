@@ -165,7 +165,7 @@ pytest -q
 
 Releases: `git tag v0.1.1 && git push --tags` builds the package and publishes it to PyPI through trusted publishing (`.github/workflows/release.yml`, no token stored); bump `version` in `pyproject.toml` and `src/plaudit/__init__.py` first.
 
-The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module.
+The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module. The summarizer takes its model as a `chat(system, user) -> str` callable (`OpenAIChat` in production, a function in tests), so chunking, merge rounds and the answer cache are tested without HTTP. Domain terms are in `GLOSSARY.md`.
 
 ## License
 

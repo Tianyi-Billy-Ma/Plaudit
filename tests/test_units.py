@@ -235,18 +235,16 @@ def test_failed_job_backs_off_before_retrying(cfg, clip):
     assert due(job)
 
 
-def test_long_transcripts_merge_in_rounds_no_call_over_chunk_size(cfg):
+def test_long_transcripts_merge_in_rounds_no_call_over_chunk_size():
     from plaudit.summarize import Summarizer
 
-    cfg["summary"].update(base_url="http://x", chunk_chars=300, language="en")
-    s = Summarizer(cfg)
     calls = []
 
     def fake_chat(system, user):
         calls.append(len(user))
         return "## Summary\n- part %d\n" % len(calls)
 
-    s._chat = fake_chat
+    s = Summarizer(fake_chat, "en", 300)
     out = s.summarize("".join("line %03d " % i + "x" * 40 + "\n" for i in range(60)))
     assert out.startswith("## Summary") and len(calls) > 2
     assert max(calls) <= 300 + len(s.merge_prompt)
@@ -269,11 +267,9 @@ def test_retry_reuses_saved_transcript(cfg, clip, tmp_path):
     assert r["transcript"].as_text() == "[00:00:00] S1: hi"
 
 
-def test_empty_answer_retries_as_halves(cfg):
+def test_empty_answer_retries_as_halves():
     from plaudit.summarize import EmptySummary, Summarizer
 
-    cfg["summary"].update(base_url="http://x", chunk_chars=5000, language="en")
-    s = Summarizer(cfg)
     calls = []
 
     def fake_chat(system, user):
@@ -282,66 +278,63 @@ def test_empty_answer_retries_as_halves(cfg):
             raise EmptySummary("length")
         return "## Summary\n- ok\n"
 
-    s._chat = fake_chat
+    s = Summarizer(fake_chat, "en", 5000)
     text = "".join("line %03d " % i + "x" * 40 + "\n" for i in range(80))  # ~4000 chars, one chunk
     assert s.summarize(text).startswith("## Summary")
     assert calls[0] > 1500 and len(calls) >= 5  # whole, two halves (one more split), merges
     with pytest.raises(EmptySummary):
-        s._chat = lambda system, user: (_ for _ in ()).throw(EmptySummary("length"))
-        s.summarize(text)
+        Summarizer(lambda system, user: (_ for _ in ()).throw(EmptySummary("length")), "en", 5000).summarize(text)
 
     def merge_fails(system, user):  # halves answer, every merge comes back empty: keep the halves
         if user.startswith(s.merge_prompt) or len(user) > 1500:
             raise EmptySummary("length")
         return "## Summary\n- %d\n" % len(user)
 
-    s._chat = merge_fails
-    assert s.summarize(text).count("## Summary") >= 2
+    assert Summarizer(merge_fails, "en", 5000).summarize(text).count("## Summary") >= 2
 
 
-def test_summary_answers_are_cached_on_disk(cfg, tmp_path):
+def test_summary_answers_are_cached_on_disk(tmp_path):
     from plaudit.summarize import Summarizer
 
-    cfg["summary"].update(base_url="http://x", chunk_chars=300, language="en")
-    s = Summarizer(cfg)
     n = [0]
 
     def fake(system, user):
         n[0] += 1
         return "## Summary\n- %d\n" % n[0]
 
-    s._chat_uncached = fake
+    s = Summarizer(fake, "en", 300, model="m")
     text = "".join("line %02d " % i + "x" * 40 + "\n" for i in range(20))
     first = s.summarize(text, cache_file=tmp_path / "c.json")
     calls = n[0]
     assert calls > 1 and (tmp_path / "c.json").exists()
-    s2 = Summarizer(cfg)
-    s2._chat_uncached = lambda system, user: (_ for _ in ()).throw(AssertionError("must hit cache"))
+    s2 = Summarizer(lambda system, user: (_ for _ in ()).throw(AssertionError("must hit cache")), "en", 300, model="m")
     assert s2.summarize(text, cache_file=tmp_path / "c.json") == first
+    s3 = Summarizer(fake, "en", 300, model="other")  # another model never reuses the first one's answers
+    assert s3.summarize(text, cache_file=tmp_path / "c.json") != first
 
 
 def test_cut_off_reply_counts_as_empty_answer(cfg, monkeypatch):
     import http.client
 
     from plaudit import summarize
-    from plaudit.summarize import EmptySummary, Summarizer
+    from plaudit.summarize import EmptySummary, OpenAIChat
 
     cfg["summary"].update(base_url="http://x", language="en")
     monkeypatch.setattr(summarize, "post_json", lambda *a, **k: (_ for _ in ()).throw(http.client.IncompleteRead(b"")))
     with pytest.raises(EmptySummary):
-        Summarizer(cfg)._chat_uncached("s", "u")
+        OpenAIChat(cfg["summary"])("s", "u")
 
 
 def test_reasoning_effort_is_sent_only_when_configured(cfg, monkeypatch):
     from plaudit import summarize
-    from plaudit.summarize import Summarizer
+    from plaudit.summarize import OpenAIChat
 
     sent = []
     monkeypatch.setattr(summarize, "post_json", lambda url, payload, *a, **k: sent.append(payload) or {"choices": [{"message": {"content": "ok"}}]})
     cfg["summary"].update(base_url="http://x")
-    Summarizer(cfg)._chat_uncached("s", "u")
+    OpenAIChat(cfg["summary"])("s", "u")
     cfg["summary"]["reasoning_effort"] = "none"
-    Summarizer(cfg)._chat_uncached("s", "u")
+    OpenAIChat(cfg["summary"])("s", "u")
     assert "reasoning_effort" not in sent[0] and sent[1]["reasoning_effort"] == "none"
 
 
@@ -484,14 +477,14 @@ def test_provider_preset_fills_only_what_the_user_left_unset(tmp_path):
 
 def test_temperature_is_sent_unless_null(cfg, monkeypatch):
     from plaudit import summarize
-    from plaudit.summarize import Summarizer
+    from plaudit.summarize import OpenAIChat
 
     sent = []
     monkeypatch.setattr(summarize, "post_json", lambda url, payload, *a, **k: sent.append(payload) or {"choices": [{"message": {"content": "ok"}}]})
     cfg["summary"].update(base_url="http://x")
-    Summarizer(cfg)._chat_uncached("s", "u")
+    OpenAIChat(cfg["summary"])("s", "u")
     cfg["summary"]["temperature"] = None
-    Summarizer(cfg)._chat_uncached("s", "u")
+    OpenAIChat(cfg["summary"])("s", "u")
     assert sent[0]["temperature"] == 0.2 and "temperature" not in sent[1]
 
 

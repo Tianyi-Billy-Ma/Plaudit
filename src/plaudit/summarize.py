@@ -36,31 +36,18 @@ class EmptySummary(RuntimeError):
     """The model returned no content (a reasoning model spent its whole budget thinking)."""
 
 
-class Summarizer:
-    def __init__(self, cfg: dict):
-        sc = cfg["summary"]
+class OpenAIChat:
+    """The production chat adapter: any OpenAI-compatible /chat/completions endpoint."""
+
+    def __init__(self, sc: dict):
         self.url = sc["base_url"].rstrip("/") + "/chat/completions"
         self.model = sc["model"]
-        self.lang = sc["language"]
-        self.chunk_chars = sc["chunk_chars"]
         self.extra = {k: sc[k] for k in ("temperature", "reasoning_effort") if sc.get(k) is not None}
-        self.cache, self.cache_file = {}, None
         self.headers = {}
         if key := secret(sc.get("api_key_env")):
             self.headers["Authorization"] = f"Bearer {key}"
 
-    def _chat(self, system: str, user: str) -> str:
-        # Every answer is cached on disk per prompt: a 2 h recording is ~40 calls over 2.5 h, and one cut
-        # connection must not throw them all away.
-        key = hashlib.sha256((self.model + system + user).encode()).hexdigest()[:16]
-        if key in self.cache:
-            return self.cache[key]
-        self.cache[key] = out = self._chat_uncached(system, user)
-        if self.cache_file:
-            self.cache_file.write_text(json.dumps(self.cache, ensure_ascii=False))
-        return out
-
-    def _chat_uncached(self, system: str, user: str) -> str:
+    def __call__(self, system: str, user: str) -> str:
         try:
             resp = post_json(self.url, {
                 "model": self.model,
@@ -75,6 +62,29 @@ class Summarizer:
         if not msg.get("content"):
             raise EmptySummary(f"empty summary from {self.model} (finish_reason={resp['choices'][0].get('finish_reason')})")
         return msg["content"].strip()
+
+
+class Summarizer:
+    """Chunking, merge rounds, halving on empty answers and the on-disk cache, over any `chat(system, user) -> str`
+    that raises EmptySummary when the model returns nothing. `model` only labels the cache key."""
+
+    def __init__(self, chat, lang: str, chunk_chars: int, model: str = ""):
+        self.chat_uncached = chat
+        self.lang = lang
+        self.chunk_chars = chunk_chars
+        self.model = model
+        self.cache, self.cache_file = {}, None
+
+    def _chat(self, system: str, user: str) -> str:
+        # Every answer is cached on disk per prompt: a 2 h recording is ~40 calls over 2.5 h, and one cut
+        # connection must not throw them all away.
+        key = hashlib.sha256((self.model + system + user).encode()).hexdigest()[:16]
+        if key in self.cache:
+            return self.cache[key]
+        self.cache[key] = out = self.chat_uncached(system, user)
+        if self.cache_file:
+            self.cache_file.write_text(json.dumps(self.cache, ensure_ascii=False))
+        return out
 
     def _chat_or_split(self, system: str, text: str, prefix: str = "") -> str:
         """One call; if the model returns nothing, halve the text and merge the two answers (thinking length
@@ -130,3 +140,10 @@ def chunk(text: str, max_chars: int) -> list[str]:
     if cur.strip():
         parts.append(cur)
     return parts or [""]
+
+
+def build(cfg: dict) -> Summarizer | None:
+    sc = cfg["summary"]
+    if not sc["base_url"]:
+        return None
+    return Summarizer(OpenAIChat(sc), sc["language"], sc["chunk_chars"], model=sc["model"])
