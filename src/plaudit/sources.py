@@ -56,6 +56,22 @@ class FolderSource:
             yield new_job(dest, f.stem, "folder", source_id=dest.name, when=when)
 
 
+class RcloneSource:
+    """Any rclone remote (Dropbox, Google Drive, OneDrive, S3, Nextcloud...) used as a drop folder: new audio files
+    are moved into the watched folder, which queues them. Moving keeps the remote as the inbox it is; the finished
+    recording is backed up by `backup.remote`."""
+
+    def __init__(self, cfg: dict):
+        self.remote = cfg["sources"]["rclone"]["remote"]
+        self.folder = cfg["sources"]["folder"]["path"]
+
+    def pull(self) -> Iterator[dict]:
+        include = "*.{" + ",".join(e[1:] for e in sorted(AUDIO_EXT)) + "}"
+        subprocess.run(["rclone", "move", "--ignore-case", "--include", include, "--max-depth", "1", self.remote, self.folder],
+                       check=True, timeout=1800)
+        return iter(())  # FolderSource runs next and queues what arrived
+
+
 class PlaudSource:
     """Official @plaud-ai/cli. Plaud has no consumer webhook, so this runs on a timer and keeps seen.json."""
 
@@ -133,7 +149,10 @@ def parse_url(text: str) -> str | None:
 def build(cfg: dict, data_dir: Path) -> list:
     inbox = data_dir / "inbox"
     inbox.mkdir(parents=True, exist_ok=True)
-    srcs = [FolderSource(cfg, inbox)]
+    srcs = []
+    if cfg["sources"].get("rclone", {}).get("remote"):
+        srcs.append(RcloneSource(cfg))  # before the folder source, so its files are queued in the same run
+    srcs.append(FolderSource(cfg, inbox))
     if cfg["sources"]["plaud"].get("enabled"):
         srcs.append(PlaudSource(cfg, inbox, data_dir))
     return srcs

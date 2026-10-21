@@ -10,6 +10,10 @@ sources:
   plaud:
     enabled: true          # needs `plaud login` once
     lookback_days: 7
+  # rclone:
+  #   remote: dropbox:Recordings   # audio dropped here is moved into the watched folder every run
+  # upload:
+  #   port: 8787           # `plaudit serve`; token from $PLAUDIT_UPLOAD_TOKEN
 
 diarization:
   backend: nemotron        # or none

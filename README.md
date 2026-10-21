@@ -34,6 +34,9 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `sources.folder.path` | `~/plaudit/inbox` | watched folder; audio files (`.mp3 .wav .m4a .aac .ogg .opus .flac .mp4 .webm .wma`) are moved into the queue once they are at least 10 s old |
 | `sources.plaud.enabled` | `false` | fetch new Plaud recordings on every run (needs `plaud login`) |
 | `sources.plaud.lookback_days` | `7` | ignore recordings uploaded before this; clips under 60 s are ignored too, and both are remembered in `seen.json` so they are never re-checked |
+| `sources.rclone.remote` | `null` | an rclone remote folder used as a drop box, e.g. `dropbox:Recordings` or `gdrive:Voice Memos`; on every run its audio files (top level) are **moved** into the watched folder and queued |
+| `sources.upload.port` | `8787` | port for `plaudit serve`, the HTTP upload endpoint (see Run) |
+| `sources.upload.token_env` | `PLAUDIT_UPLOAD_TOKEN` | environment variable holding the bearer token every upload must send; `serve` refuses to start without it |
 | `diarization.backend` | `none` | `nemotron` (local model; 100M parameters, so it also runs on a CPU in seconds, which gives a box without a GPU speaker labels while transcription goes over HTTP) or `none` (one speaker, still chunked) |
 | `diarization.model` | `nvidia/Nemotron-3-Diarization` | Hugging Face id |
 | `diarization.max_turn_seconds` | `30` | longer speaker turns are split before transcription |
@@ -95,6 +98,7 @@ Secrets never go in `plaudit.yaml`. Plaudit reads them from environment variable
 | `OPENAI_API_KEY` | the chat endpoint that writes the minutes (a `summary.provider` preset names its own variable, see [Providers](#providers)) |
 | `NOTION_TOKEN` | Notion internal integration, when `outputs.notion.database_id` is set |
 | `PLAUDIT_ASR_API_KEY` | the transcription endpoint, as named in the `--api` config |
+| `PLAUDIT_UPLOAD_TOKEN` | bearer token for `plaudit serve` |
 | `PLAUDIT_WEBHOOK_URL` | a webhook URL that carries a token |
 | `PLAUDIT_NOTIFY_URLS` | Apprise URLs with tokens or passwords, e.g. `discord://<id>/<token> mailto://user:pass@gmail.com` |
 
@@ -112,9 +116,11 @@ plaudit pull                 # only fetch new recordings into the queue
 plaudit status               # one line per job: id, waiting / delayed / running / done / stuck / retired, title, last error
 plaudit process meeting.m4a [--title T] [--date YYYY-MM-DD]   # one file now; prints the minutes and the output links
 plaudit notion-init <parent page id> [--title Meetings]       # create a Notion database for Plaudit, prints its id
+plaudit serve [--host 0.0.0.0] [--port 8787]                  # HTTP upload endpoint into the watched folder; keep `run --loop` or the timer going as well
+curl -T meeting.m4a -H "Authorization: Bearer $PLAUDIT_UPLOAD_TOKEN" http://host:8787/meeting.m4a
 ```
 
-Drop a file into the watched folder and it is queued on the next run. With the Plaud source on, new recordings are fetched every run; Plaud has no webhook, so a timer is the only way. `plaudit process` takes the same lock as `run`, writes its result into the queue as a finished job (so it is backed up and retired like any other) and does not touch the file you gave it.
+Drop a file into the watched folder and it is queued on the next run. The same folder is where the other ways in land: `sources.rclone.remote` moves audio out of a cloud folder (anything rclone speaks: Dropbox, Google Drive, OneDrive, S3, Nextcloud; the usual route for a phone's voice-memo app) into it on every run, and `plaudit serve` writes files sent with `PUT`/`POST` into it (the URL path is the file name, the body is the file; an iOS Shortcut "Get Contents of URL" with the file as request body works). The endpoint speaks plain HTTP: put it behind your reverse proxy or a VPN for anything beyond a LAN. With the Plaud source on, new recordings are fetched every run; Plaud has no webhook, so a timer is the only way. `plaudit process` takes the same lock as `run`, writes its result into the queue as a finished job (so it is backed up and retired like any other) and does not touch the file you gave it.
 
 ## How it behaves
 

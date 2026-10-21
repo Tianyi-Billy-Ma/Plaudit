@@ -518,3 +518,48 @@ def test_whisper_backend_maps_language_and_joins_segments(cfg, clip, monkeypatch
     turns = transcribe.build(cfg).transcribe(wav, [Segment(0.0, 1.0, "Speaker 1")])
     assert turns[0].text == "hello world"
     assert calls[0] == "turbo" and calls[1]["language"] == "zh"
+
+
+def test_rclone_source_moves_into_watched_folder(cfg, monkeypatch):
+    from plaudit import sources
+
+    calls = []
+    monkeypatch.setattr(sources.subprocess, "run", lambda cmd, **k: calls.append(cmd))
+    cfg["sources"]["rclone"]["remote"] = "dropbox:Recordings"
+    srcs = sources.build(cfg, Path(cfg["data_dir"]))
+    assert [type(s).__name__ for s in srcs] == ["RcloneSource", "FolderSource"]
+    assert list(srcs[0].pull()) == []
+    assert calls[0][:3] == ["rclone", "move", "--ignore-case"] and calls[0][-2:] == ["dropbox:Recordings", cfg["sources"]["folder"]["path"]]
+    assert "*.{aac,flac,m4a,mp3,mp4,ogg,opus,wav,webm,wma}" in calls[0]
+
+
+def test_upload_endpoint(cfg):
+    import threading
+    import urllib.error
+    import urllib.request
+    from http.server import ThreadingHTTPServer
+
+    from plaudit.upload import make_handler
+
+    folder = Path(cfg["sources"]["folder"]["path"])
+    folder.mkdir(exist_ok=True)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(folder, "s3cret"))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+
+    def put(path, token, data=b"RIFF....", method="PUT"):
+        req = urllib.request.Request(base + path, data=data, method=method, headers={"Authorization": f"Bearer {token}"})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    assert put("/Standup%20notes.m4a", "wrong") == 401
+    assert put("/notes.txt", "s3cret") == 415
+    assert put("/Standup%20notes.m4a", "s3cret") == 201
+    assert put("/x.wav", "s3cret", method="POST") == 201
+    srv.shutdown()
+    names = sorted(p.name for p in folder.iterdir())
+    assert len(names) == 2 and names[0].startswith("Standup notes-") and names[0].endswith(".m4a")
+    assert (folder / names[0]).read_bytes() == b"RIFF...."
