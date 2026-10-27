@@ -12,7 +12,8 @@ requires-python = ">=3.10"
 dependencies = ["pyyaml>=6"]
 
 [project.optional-dependencies]
-gpu = ["transformers>=5.19", "torch", "numpy", "librosa"]
+gpu = ["transformers>=5.19", "torch", "torchaudio", "scipy", "numpy", "librosa"]  # torchaudio + scipy: ReDimNet2 features
+sherpa = ["sherpa-onnx>=1.12", "numpy"]  # `speakers.backend: sherpa`, ONNX speaker models on the CPU
 whisper = ["faster-whisper>=1.1", "numpy"]
 notify = ["apprise>=1.9"]
 dev = ["pytest", "numpy", "apprise>=1.9"]  # numpy: the Whisper backend test builds a float clip

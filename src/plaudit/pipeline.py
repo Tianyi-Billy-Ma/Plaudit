@@ -5,7 +5,7 @@ import json
 import logging
 from pathlib import Path
 
-from . import audio, config, diarize, outputs, summarize, transcribe
+from . import audio, config, diarize, outputs, summarize, transcribe, voices
 from .models import Segment, Transcript
 
 log = logging.getLogger(__name__)
@@ -14,9 +14,10 @@ log = logging.getLogger(__name__)
 class Pipeline:
     """Loads the models once; process() can then be called for many files."""
 
-    def __init__(self, cfg: dict, diarizer=None, transcriber=None, summarizer=None, sinks=None):
+    def __init__(self, cfg: dict, diarizer=None, transcriber=None, summarizer=None, sinks=None, namer=None):
         self.cfg = cfg
         self.diarizer = diarizer or diarize.build(cfg)
+        self.namer = namer or voices.Namer(cfg)
         self.transcriber = transcriber or transcribe.build(cfg)
         self.summarizer = summarizer or summarize.build(cfg)
         self.sinks = outputs.build(cfg) if sinks is None else sinks
@@ -31,7 +32,7 @@ class Pipeline:
             d = json.loads(saved.read_text())
             transcript = Transcript([Segment(**x) for x in d["segments"]], d["language"])
         else:
-            turns = self.diarizer.diarize(wav)
+            turns = self.namer.name(wav, self.diarizer.diarize(wav))
             log.info("%s: %d speaker turns", meta["title"], len(turns))
             transcript = Transcript(self.transcriber.transcribe(wav, turns), self.cfg["language"])
             saved.write_text(json.dumps(transcript.to_dict(), ensure_ascii=False, indent=1))

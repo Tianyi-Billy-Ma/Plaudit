@@ -51,6 +51,7 @@ def cfg(tmp_path):
         f"data_dir: {tmp_path}/data\nglossary: {tmp_path}/glossary.txt\n"
         f"sources:\n  folder:\n    path: {tmp_path}/inbox\n"
         f"outputs:\n  markdown:\n    dir: {tmp_path}/notes\n  notion:\n    database_id: null\n"
+        f"speakers:\n  voices: {tmp_path}/voices\n"
         f"min_free_mem_gb: 0\n"
     )
     return config.load(tmp_path / "plaudit.yaml")

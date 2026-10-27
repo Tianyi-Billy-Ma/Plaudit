@@ -14,5 +14,6 @@ ExecStart=/bin/bash -c 'set -a; . %h/.config/secrets.env; set +a; exec /usr/bin/
   --memory=7g --memory-swap=7g -e OPENAI_API_KEY -e NOTION_TOKEN -e PLAUDIT_ASR_API_KEY \
   -e PLAUDIT_WEBHOOK_URL -e PLAUDIT_NOTIFY_URLS \
   -v %h/plaudit:/plaudit -v %h/.plaud:/root/.plaud -v %h/.config/rclone:/root/.config/rclone:ro \
-  -v %h/.cache/huggingface:/root/.cache/huggingface -v /etc/localtime:/etc/localtime:ro \
+  -v %h/.cache/huggingface:/root/.cache/huggingface -v %h/.cache/torch:/root/.cache/torch \
+  -v /etc/localtime:/etc/localtime:ro \
   plaudit:0.1.0 run'

@@ -373,7 +373,7 @@ def test_process_command_output_joins_the_queue_as_done(cfg, clip, tmp_path, mon
 
     monkeypatch.setattr(pipeline, "diarize", type("D", (), {"build": staticmethod(lambda cfg: FakeDiarizer())}))
     monkeypatch.setattr(pipeline, "transcribe", type("T", (), {"build": staticmethod(lambda cfg: FakeTranscriber())}))
-    assert cli.main(["-c", str(tmp_path / "plaudit.yaml"), "process", str(clip), "--title", "Manual"]) == 0
+    assert cli.main(["-c", str(tmp_path / "plaudit.yaml"), "run", str(clip), "--title", "Manual"]) == 0
     jobs = Queue(cfg).jobs()
     assert len(jobs) == 1 and jobs[0]["status"] == "done" and jobs[0]["title"] == "Manual"
     assert (Queue(cfg).done_dir / jobs[0]["id"] / clip.name).exists()  # the original audio is kept for the backup
@@ -556,3 +556,140 @@ def test_upload_endpoint(cfg):
     names = sorted(p.name for p in folder.iterdir())
     assert len(names) == 2 and names[0].startswith("Standup notes-") and names[0].endswith(".m4a")
     assert (folder / names[0]).read_bytes() == b"RIFF...."
+
+
+class ToneEmbedder:
+    """Unit vector of the energy at 440 and 660 Hz: the test clip's two 'speakers' are those two tones."""
+
+    def embed(self, clip):
+        import numpy as np
+
+        spectrum = np.abs(np.fft.rfft(clip))
+        hz = np.fft.rfftfreq(len(clip), 1 / 16000)
+        v = np.array([spectrum[np.abs(hz - f) < 5].sum() for f in (440, 660)]) + 1e-6
+        return v / np.linalg.norm(v)
+
+
+def tone_wav(path, *tones, seconds=2):
+    """16 kHz mono clip of `seconds` of each tone in turn: tone_wav(p, 440, 660) is 2 s of 440 Hz then 2 s of 660 Hz."""
+    import math
+    import struct
+    import wave
+
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        for hz in tones:
+            w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * hz * i / 16000))) for i in range(16000 * seconds)))
+    return path
+
+
+def test_speakers_are_named_from_voice_samples(cfg, tmp_path):
+    from conftest import FakeDiarizer
+
+    from plaudit import voices
+
+    folder = Path(cfg["speakers"]["voices"])
+    folder.mkdir()
+    tone_wav(folder / "Alice.wav", 440)
+    tone_wav(folder / "Alice.2.wav", 440)  # a second sample of the same person
+    (folder / ".DS_Store").write_text("")
+    assert list(voices.samples(folder)) == ["Alice"]
+    wav = tone_wav(tmp_path / "a.wav", 440, 660)  # Speaker 1 is the 440 Hz voice, Speaker 2 the 660 Hz one
+    namer = voices.Namer(cfg, embedder=ToneEmbedder())
+    turns = namer.name(wav, FakeDiarizer().diarize(wav))
+    assert [t.speaker for t in turns] == ["Alice", "Speaker 2"]  # 660 Hz matches nobody above the threshold
+    assert voices.Namer(cfg, embedder=ToneEmbedder()).name(wav, FakeDiarizer().diarize(wav)) is not None
+    folder.joinpath("Alice.wav").unlink(), folder.joinpath("Alice.2.wav").unlink()
+    assert [t.speaker for t in namer.name(wav, FakeDiarizer().diarize(wav))] == ["Speaker 1", "Speaker 2"]  # empty folder: untouched
+
+
+def test_one_name_goes_to_one_speaker(cfg, tmp_path):
+    from plaudit import voices
+
+    folder = Path(cfg["speakers"]["voices"])
+    folder.mkdir()
+    tone_wav(folder / "Alice.wav", 440)
+    tone_wav(folder / "Bob.wav", 660)
+    wav = tone_wav(tmp_path / "a.wav", 440, 660)
+    turns = [Segment(0.0, 1.0, "Speaker 1"), Segment(1.0, 2.0, "Speaker 1"), Segment(2.0, 4.0, "Speaker 2"),
+             Segment(1.5, 2.5, "Speaker 3")]  # half 440 Hz: a worse match for Alice than Speaker 1, and under the threshold
+    cfg["speakers"]["threshold"] = 0.9
+    named = voices.Namer(cfg, embedder=ToneEmbedder()).name(wav, turns)
+    assert [t.speaker for t in named] == ["Alice", "Alice", "Bob", "Speaker 3"]
+
+
+def test_rename_rewrites_the_job_and_enrols_the_voice(cfg, tmp_path, monkeypatch):
+    import json
+
+    from conftest import FakeDiarizer, FakeSummarizer, FakeTranscriber
+
+    from plaudit import cli, voices
+    from plaudit.daemon import Queue
+    from plaudit.pipeline import Pipeline
+    from plaudit.sources import new_job
+
+    monkeypatch.setenv("PLAUDIT_CONFIG", str(tmp_path / "plaudit.yaml"))
+    q = Queue(cfg)
+    job = new_job(tone_wav(tmp_path / "sync.wav", 440, 660), "sync", "manual")
+    q.process(job, Pipeline(cfg, diarizer=FakeDiarizer(), transcriber=FakeTranscriber(), summarizer=FakeSummarizer()))
+    workdir = q.done_dir / job["id"]
+    assert cli.main(["rename", job["id"], "Speaker 2=张三", "--enrol"]) == 0
+    saved = json.loads((workdir / "transcript.json").read_text())
+    assert [s["speaker"] for s in saved["segments"]] == ["Speaker 1", "张三"]
+    for text in ((workdir / "notes.md").read_text(), Path(job["links"][0]).read_text()):
+        assert "] 张三: turn 1" in text and "Speaker 2" not in text and "Speaker 1" in text
+    sample = Path(cfg["speakers"]["voices"]) / "张三.wav"
+    assert sample.exists() and 1.9 < len(voices.read_pcm(sample)) / 2 / 16000 <= 2.0  # Speaker 2's 2 s turn
+    assert ToneEmbedder().embed(voices.clip_float(voices.read_pcm(sample), Segment(0, 2, "")))[1] > 0.99  # the 660 Hz voice
+    cli.main(["rename", job["id"], "Speaker 1=Bob", "--enrol"])
+    cli.main(["rename", job["id"], "Bob=Bob", "--enrol"])  # a second sample of Bob gets the next number
+    assert (Path(cfg["speakers"]["voices"]) / "Bob.2.wav").exists()
+    assert cli.main(["voices", "add", "Bob", str(tone_wav(tmp_path / "bob.wav", 660))]) == 0  # the queue moved sync.wav
+    assert (Path(cfg["speakers"]["voices"]) / "Bob.3.wav").exists()
+    assert cli.main(["voices"]) == 0
+    with pytest.raises(SystemExit):
+        cli.main(["voices", "add", "../x", str(tmp_path / "bob.wav")])
+    with pytest.raises(SystemExit):
+        cli.main(["rename", job["id"], "Speaker 9=Nobody"])
+
+
+def test_config_lives_in_xdg_config_and_legacy_path_still_works(tmp_path, monkeypatch):
+    from plaudit import config
+
+    for var in ("PLAUDIT_CONFIG", "XDG_CONFIG_HOME", "XDG_DATA_HOME"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    new, legacy = tmp_path / ".config" / "plaudit" / "plaudit.yaml", tmp_path / "plaudit" / "plaudit.yaml"
+    assert config.config_path() == new
+    legacy.parent.mkdir()
+    legacy.write_text("")
+    assert config.config_path() == legacy  # a pre-0.2 install keeps working
+    new.parent.mkdir(parents=True)
+    new.write_text("")
+    assert config.config_path() == new
+    cfg = config.load()
+    assert cfg["glossary"] == str(new.with_name("glossary.txt")) and cfg["speakers"]["voices"] == str(new.with_name("voices"))
+    assert cfg["data_dir"] == str(tmp_path / ".local" / "share" / "plaudit")
+    assert cfg["outputs"]["markdown"]["dir"] == str(tmp_path / "plaudit" / "notes")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdgdata"))
+    assert config.load()["data_dir"] == str(tmp_path / "xdgdata" / "plaudit")
+
+
+def test_process_writes_the_note_where_asked(cfg, clip, tmp_path, monkeypatch):
+    from conftest import FakeDiarizer, FakeTranscriber
+
+    from plaudit import cli, pipeline
+
+    monkeypatch.setattr(pipeline, "diarize", type("D", (), {"build": staticmethod(lambda cfg: FakeDiarizer())}))
+    monkeypatch.setattr(pipeline, "transcribe", type("T", (), {"build": staticmethod(lambda cfg: FakeTranscriber())}))
+    c = str(tmp_path / "plaudit.yaml")
+    assert cli.main(["-c", c, "run", str(clip), str(tmp_path / "out" / "my notes.md"), "--title", "A"]) == 0
+    assert "# A" in (tmp_path / "out" / "my notes.md").read_text()
+    assert cli.main(["-c", c, "run", str(clip), str(tmp_path / "folder"), "--title", "B", "--date", "2026-10-27"]) == 0
+    assert (tmp_path / "folder" / "2026-10-27 B.md").exists()
+    assert not Path(cfg["outputs"]["markdown"]["dir"]).exists()  # the configured folder was not used
+    (tmp_path / "plaudit.yaml").write_text((tmp_path / "plaudit.yaml").read_text().replace("  markdown:\n    dir:", "  markdown: null\n  x:"))
+    assert cli.main(["-c", c, "run", str(clip), str(tmp_path / "c.md"), "--title", "C"]) == 0  # Markdown output off in config
+    assert (tmp_path / "c.md").exists()

@@ -38,9 +38,14 @@ def slice_wav(pcm: bytes, start: float, end: float) -> bytes:
     """Return a complete WAV file (bytes) for pcm[start:end] seconds."""
     a, b = int(start * SAMPLE_RATE) * 2, int(end * SAMPLE_RATE) * 2
     buf = io.BytesIO()
-    with wave.open(buf, "wb") as w:
+    write_wav(buf, pcm[a:b])
+    return buf.getvalue()
+
+
+def write_wav(dst, pcm: bytes) -> None:
+    """Write 16 kHz mono PCM16 bytes as a WAV file to a path or a binary file object."""
+    with wave.open(dst if hasattr(dst, "write") else str(dst), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
         w.setframerate(SAMPLE_RATE)
-        w.writeframes(pcm[a:b])
-    return buf.getvalue()
+        w.writeframes(pcm)

@@ -14,6 +14,6 @@ COPY src ./src
 RUN pip install --no-cache-dir ".${EXTRAS:+[$EXTRAS]}"
 
 ENV PLAUDIT_CONFIG=/plaudit/plaudit.yaml HF_HUB_DISABLE_TELEMETRY=1
-VOLUME ["/plaudit", "/root/.plaud", "/root/.config/rclone", "/root/.cache/huggingface"]
+VOLUME ["/plaudit", "/root/.plaud", "/root/.config/rclone", "/root/.cache/huggingface", "/root/.cache/torch"]
 ENTRYPOINT ["plaudit"]
 CMD ["run"]

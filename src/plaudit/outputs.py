@@ -32,13 +32,18 @@ def render_markdown(meta: dict, summary: str, transcript: Transcript, audio_link
 
 
 class MarkdownOutput:
-    def __init__(self, cfg: dict):
-        self.dir = Path(cfg["outputs"]["markdown"]["dir"])
+    """One note per meeting in `outputs.markdown.dir`, or at `target`: a .md file (written as is) or a folder."""
+
+    def __init__(self, cfg: dict, target: Path | None = None):
+        if target and target.suffix == ".md":
+            self.file, self.dir = target, target.parent
+        else:
+            self.file, self.dir = None, target or Path(cfg["outputs"]["markdown"]["dir"])
 
     def publish(self, meta: dict, summary: str, transcript: Transcript, audio_link: str | None = None, links=()) -> str:
-        self.dir.mkdir(parents=True, exist_ok=True)
-        path = self.dir / f"{meta['date']} {safe(meta['title'])}.md"
-        if path.exists():  # second meeting with the same title that day
+        path = self.file or self.dir / f"{meta['date']} {safe(meta['title'])}.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if path.exists() and not self.file:  # second meeting with the same title that day
             path = path.with_stem(f"{path.stem} {meta['id']}")
         path.write_text(render_markdown(meta, summary, transcript, audio_link))
         return str(path)
