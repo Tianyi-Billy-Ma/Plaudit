@@ -13,6 +13,7 @@ services:
     volumes:
       - ${HOME}/plaudit:/plaudit               # plaudit.yaml, glossary.txt, data/
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface   # shared Hugging Face model cache
+      - ${HOME}/.cache/torch:/root/.cache/torch   # ReDimNet2 speaker model (torch.hub)
       - /etc/localtime:/etc/localtime:ro       # meeting dates in local time
       - ${HOME}/.plaud:/root/.plaud            # Plaud CLI login
       - ${HOME}/.config/rclone:/root/.config/rclone:ro   # read-only so token refreshes do not leave a root-owned file

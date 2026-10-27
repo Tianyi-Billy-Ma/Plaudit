@@ -1,7 +1,5 @@
 # Plaudit without a GPU: transcription and summary over HTTP, Markdown output only.
-data_dir: ~/plaudit/data
-glossary: ~/plaudit/glossary.txt
-# Secrets: environment variables, or a .env file next to this one (KEY=value lines).
+# Lives in ~/.config/plaudit/ with .env (secrets, KEY=value lines) and glossary.txt next to it.
 
 sources:
   folder:
@@ -9,6 +7,10 @@ sources:
 
 diarization:
   backend: none   # nemotron works on the CPU too (pip install "plaudit[gpu]"): speaker labels without a GPU
+
+# speakers:       # with diarization on: name the speakers from voice samples in ~/plaudit/voices (张三.wav ...)
+#   backend: sherpa                    # ONNX on the CPU, pip install "plaudit[sherpa]"
+#   model: ~/plaudit/3dspeaker_speech_eres2netv2_sv_zh-cn_16k-common.onnx   # from the sherpa-onnx speaker models release
 
 transcription:
   backend: openai
@@ -24,7 +26,7 @@ summary:
 
 outputs:
   markdown:
-    dir: ~/plaudit/data/notes
+    dir: ~/plaudit/notes
 
 backup:
   remote: null

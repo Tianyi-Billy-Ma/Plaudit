@@ -1,7 +1,7 @@
 # Plaudit reference config: local models on one GPU box, summary through an OpenAI-compatible endpoint.
-data_dir: ~/plaudit/data
-glossary: ~/plaudit/glossary.txt
-# Secrets: environment variables, or a .env file next to this one (KEY=value lines).
+# Lives in ~/.config/plaudit/ with .env (secrets, KEY=value lines), glossary.txt and voices/ next to it.
+# data_dir: ~/.local/share/plaudit   # queue state and finished jobs; the default
+# glossary: glossary.txt next to this file by default
 language: null            # auto-detect; or "Chinese" / "English"
 
 sources:
@@ -20,6 +20,12 @@ diarization:
   model: nvidia/Nemotron-3-Diarization
   max_turn_seconds: 30
 
+speakers:                  # who is Speaker 2: one audio sample per person in `voices` (张三.wav, Billy.m4a)
+  backend: redimnet2       # redimnet2 (default, best on Chinese + English), xvector (any HF *ForXVector model) or sherpa (ONNX, CPU)
+  model: b6                # ReDimNet2 size; b3 on a CPU box. xvector: a HF id; sherpa: path of the .onnx file
+  # voices: ~/.config/plaudit/voices   # the default: next to this file
+  # threshold: 0.5         # cosine similarity needed for a match; the log shows every speaker's best score
+
 transcription:
   backend: qwen_asr
   model: Qwen/Qwen3-ASR-1.7B-hf
@@ -34,7 +40,7 @@ summary:
 
 outputs:
   markdown:
-    dir: ~/plaudit/data/notes
+    dir: ~/plaudit/notes   # one YYYY-MM-DD <title>.md per meeting; `plaudit run file.m4a out.md` overrides it
   notion:
     database_id: null      # set to publish one page per meeting; token from $NOTION_TOKEN
     token_env: NOTION_TOKEN

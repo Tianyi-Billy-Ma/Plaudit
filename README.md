@@ -11,25 +11,26 @@ Plaudit is not affiliated with Plaud. It reads Plaud recordings only through the
 ```bash
 pip install plaudit              # or: uv tool install plaudit / pipx install plaudit / uvx plaudit
 pip install "plaudit[notify]"    # adds Apprise for Slack, Discord, Teams, Telegram, e-mail... notifications
-pip install "plaudit[gpu]"       # adds transformers, torch, numpy, librosa for the local models
+pip install "plaudit[gpu]"       # adds transformers, torch, torchaudio, numpy, librosa for the local models
+pip install "plaudit[sherpa]"    # adds sherpa-onnx for ONNX speaker-recognition models on the CPU
 pip install "plaudit[whisper]"   # adds faster-whisper for local Whisper on CPU or CUDA
 sudo apt install ffmpeg          # required (ffmpeg and ffprobe); brew install ffmpeg on a Mac
 sudo apt install rclone          # only for backups
 npm i -g @plaud-ai/cli           # only for the Plaud source (Node 22+), then `plaud login` once
-plaudit init                     # writes ~/plaudit/plaudit.yaml, inbox/ and glossary.txt (--api for the no-GPU config)
-plaudit process meeting.m4a      # first result: minutes printed, notes in ~/plaudit/data/notes
+plaudit init                     # writes ~/.config/plaudit/plaudit.yaml and glossary.txt, makes ~/plaudit/inbox (--api for the no-GPU config)
+plaudit run meeting.m4a [notes.md]   # first result: minutes printed, note in ~/plaudit/notes or the file/folder given
 ```
 
 Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly 6 GB of GPU or unified memory; see [Run on your hardware](#run-on-your-hardware). Until the first PyPI release, install from git: `pip install "plaudit[gpu] @ git+https://github.com/Tianyi-Billy-Ma/Plaudit"`.
 
 ## Configure
 
-`plaudit init` writes the local-models config (`plaudit init --api` the no-GPU one, transcription over HTTP) to `~/plaudit/plaudit.yaml`; edit it. The two templates are `src/plaudit/examples/`. Another location works with `plaudit -c path/plaudit.yaml` or `PLAUDIT_CONFIG=path/plaudit.yaml`. Every key is optional; the defaults are in `src/plaudit/config.py`.
+`plaudit init` writes the local-models config (`plaudit init --api` the no-GPU one, transcription over HTTP) to `~/.config/plaudit/plaudit.yaml`; edit it. Everything Plaudit is configured with lives in that folder: `plaudit.yaml`, `.env` (secrets), `glossary.txt` and `voices/` (speaker samples). What you look at lives in visible folders: recordings go into `~/plaudit/inbox`, notes come out in `~/plaudit/notes`; queue state is in `~/.local/share/plaudit` (`$XDG_CONFIG_HOME` and `$XDG_DATA_HOME` are honoured; a `~/plaudit/plaudit.yaml` from an earlier version is still read when the new path does not exist). The two templates are `src/plaudit/examples/`. Another location works with `plaudit -c path/plaudit.yaml` or `PLAUDIT_CONFIG=path/plaudit.yaml`. Every key is optional; the defaults are in `src/plaudit/config.py`.
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `data_dir` | `~/plaudit/data` | queue state: `inbox/` (downloaded audio), `jobs/` (one JSON per job), `done/` (one folder per finished job), `seen.json` (Plaud ids already handled), `plaudit.lock` |
-| `glossary` | `~/plaudit/glossary.txt` | one term per line, `#` comments; read fresh for every job and given to the ASR model and the summariser |
+| `data_dir` | `~/.local/share/plaudit` | queue state: `inbox/` (downloaded audio), `jobs/` (one JSON per job), `done/` (one folder per finished job), `seen.json` (Plaud ids already handled), `plaudit.lock` |
+| `glossary` | `glossary.txt` next to `plaudit.yaml` | one term per line, `#` comments; read fresh for every job and given to the ASR model and the summariser |
 | `language` | `null` | ASR language hint: `null` auto-detects, or `Chinese` / `English` (sent to HTTP endpoints as `zh` / `en`) |
 | `sources.folder.path` | `~/plaudit/inbox` | watched folder; audio files (`.mp3 .wav .m4a .aac .ogg .opus .flac .mp4 .webm .wma`) are moved into the queue once they are at least 10 s old |
 | `sources.plaud.enabled` | `false` | fetch new Plaud recordings on every run (needs `plaud login`) |
@@ -40,6 +41,10 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `diarization.backend` | `none` | `nemotron` (local model; 100M parameters, so it also runs on a CPU in seconds, which gives a box without a GPU speaker labels while transcription goes over HTTP) or `none` (one speaker, still chunked) |
 | `diarization.model` | `nvidia/Nemotron-3-Diarization` | Hugging Face id |
 | `diarization.max_turn_seconds` | `30` | longer speaker turns are split before transcription |
+| `speakers.voices` | `voices/` next to `plaudit.yaml` | one audio file per person (`张三.wav`, `Billy.m4a`; more samples as `张三.2.wav`); every diarized speaker is compared with them and gets the name when it matches, see [Name the speakers](#name-the-speakers). Empty folder: labels stay `Speaker 1`, `Speaker 2`... |
+| `speakers.backend` | `redimnet2` | the voice model: `redimnet2` ([ReDimNet2](https://github.com/PalabraAI/redimnet2), the best published open model on both English and Chinese tests, through torch.hub), `xvector` (any `*ForXVector` model on Hugging Face through transformers, e.g. `microsoft/wavlm-base-plus-sv`) or `sherpa` ([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models): 3D-Speaker ERes2NetV2 and CAM++, WeSpeaker, NeMo TitaNet as ONNX files, CPU only; `pip install "plaudit[sherpa]"`) |
+| `speakers.model` | `b6` | `redimnet2`: the size `b0`..`b6` (`b3` and `b6` have the Chinese-inclusive weights; `b3` for a CPU box); `xvector`: a Hugging Face id; `sherpa`: path of the `.onnx` file |
+| `speakers.threshold` | per backend | cosine similarity a speaker needs to get a name (`redimnet2` 0.5, `xvector` 0.86, `sherpa` 0.5); the log prints every speaker's best match and score, so raise it if strangers get named, lower it if regulars stay `Speaker N` |
 | `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers), `whisper` (local, through faster-whisper) or `openai` (any `/v1/audio/transcriptions` endpoint) |
 | `transcription.model` | `Qwen/Qwen3-ASR-1.7B-hf` | Hugging Face id, a Whisper size (`turbo`, `large-v3`) or path, or the model name the HTTP endpoint expects |
 | `transcription.provider` | unset | `openai` backend only: `openai` or `groq` fills `base_url` and `api_key_env` (see [Providers](#providers)) |
@@ -53,7 +58,7 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `summary.language` | `zh` | language of the minutes: `zh` (摘要 / 决定 / 行动项, English terms kept) or `en` (Summary / Decisions / Action items) |
 | `summary.chunk_chars` | `12000` | transcripts longer than this are summarised in parts and the parts merged; no single request is longer than this |
 | `summary.reasoning_effort` | unset | sent as-is in the request; `none` switches thinking off for reasoning models (GLM, Qwen3, DeepSeek), which otherwise think for minutes per part and may return nothing. Leave unset for models that reject the field |
-| `outputs.markdown.dir` | `~/plaudit/data/notes` | one `YYYY-MM-DD <title>.md` per meeting, with YAML front matter (`title`, `date`, `duration_min`, `source`, `audio`) so an Obsidian or Logseq vault shows them as properties; `null` turns Markdown output off |
+| `outputs.markdown.dir` | `~/plaudit/notes` | one `YYYY-MM-DD <title>.md` per meeting (`plaudit run file [output]` can point one run elsewhere), with YAML front matter (`title`, `date`, `duration_min`, `source`, `audio`) so an Obsidian or Logseq vault shows them as properties; `null` turns Markdown output off |
 | `outputs.notion.database_id` | `null` | set to publish one page per meeting into an existing database |
 | `outputs.notion.token_env` | `NOTION_TOKEN` | environment variable holding the Notion internal-integration token |
 | `outputs.notion.status_done` / `status_stuck` | `done` / `stuck` | option names to write into the database's `Status` column |
@@ -112,15 +117,23 @@ The Plaud CLI keeps its own login in `~/.plaud`, rclone its own in `~/.config/rc
 plaudit init [--api]         # starter config, inbox/ and glossary.txt; never overwrites
 plaudit run                  # pull new recordings, process the queue once, back up, exit
 plaudit run --loop 300       # the same every 5 minutes; models are reloaded each cycle so memory is free in between
+plaudit run meeting.m4a [notes.md | folder/] [--title T] [--date YYYY-MM-DD]   # one file now; prints the minutes and the output links
 plaudit pull                 # only fetch new recordings into the queue
 plaudit status               # one line per job: id, waiting / delayed / running / done / stuck / retired, title, last error
-plaudit process meeting.m4a [--title T] [--date YYYY-MM-DD]   # one file now; prints the minutes and the output links
+plaudit rename <job id> "Speaker 2=张三" ["Speaker 1=Billy"] [--enrol]            # name the speakers of a finished job; --enrol remembers their voices
+plaudit voices [add 张三 recording.m4a]                        # who Plaudit can recognise; add a recording of one person
 plaudit notion-init <parent page id> [--title Meetings]       # create a Notion database for Plaudit, prints its id
 plaudit serve [--host 0.0.0.0] [--port 8787]                  # HTTP upload endpoint into the watched folder; keep `run --loop` or the timer going as well
 curl -T meeting.m4a -H "Authorization: Bearer $PLAUDIT_UPLOAD_TOKEN" http://host:8787/meeting.m4a
 ```
 
-Drop a file into the watched folder and it is queued on the next run. The same folder is where the other ways in land: `sources.rclone.remote` moves audio out of a cloud folder (anything rclone speaks: Dropbox, Google Drive, OneDrive, S3, Nextcloud; the usual route for a phone's voice-memo app) into it on every run, and `plaudit serve` writes files sent with `PUT`/`POST` into it (the URL path is the file name, the body is the file; an iOS Shortcut "Get Contents of URL" with the file as request body works). The endpoint speaks plain HTTP: put it behind your reverse proxy or a VPN for anything beyond a LAN. With the Plaud source on, new recordings are fetched every run; Plaud has no webhook, so a timer is the only way. `plaudit process` takes the same lock as `run`, writes its result into the queue as a finished job (so it is backed up and retired like any other) and does not touch the file you gave it.
+Drop a file into the watched folder and it is queued on the next run. The same folder is where the other ways in land: `sources.rclone.remote` moves audio out of a cloud folder (anything rclone speaks: Dropbox, Google Drive, OneDrive, S3, Nextcloud; the usual route for a phone's voice-memo app) into it on every run, and `plaudit serve` writes files sent with `PUT`/`POST` into it (the URL path is the file name, the body is the file; an iOS Shortcut "Get Contents of URL" with the file as request body works). The endpoint speaks plain HTTP: put it behind your reverse proxy or a VPN for anything beyond a LAN. With the Plaud source on, new recordings are fetched every run; Plaud has no webhook, so a timer is the only way. `plaudit run INPUT` takes the same lock as the queue run, writes its result into the queue as a finished job (so it is backed up and retired like any other) and does not touch the file you gave it.
+
+### Name the speakers
+
+Diarization tells the speakers apart but calls them `Speaker 1`, `Speaker 2`... To get names, give Plaudit one recording of each regular speaker: `plaudit voices add 张三 recording.m4a` (any format ffmpeg reads, 20 to 30 s of them talking alone is plenty; run it again for a second sample), or drop the files into `speakers.voices` yourself as `张三.wav`, `张三.2.wav`... `plaudit voices` lists who is known. From the next job on, every diarized speaker is compared with the samples before transcription, so the transcript, the minutes and every output carry the names; speakers that match nobody stay `Speaker N`. Each name goes to one speaker per meeting, the best match first.
+
+The easiest way to collect samples is from meetings already processed: `plaudit rename <job id> "Speaker 2=张三" --enrol` replaces the label in that job's `transcript.json`, `notes.md` and Markdown note (not in a Notion page or notification already sent) and saves up to 30 s of that speaker's turns as `voices/张三.wav`, so the next meeting names them automatically. Without `--enrol` it only renames. The job id is the one `plaudit status` prints; it works until the job is retired.
 
 ## How it behaves
 
@@ -152,7 +165,7 @@ An existing database works too. Columns are matched by name and type and missing
 
 ## Docker and systemd
 
-`Dockerfile` builds an image with ffmpeg, rclone, Node 22, the Plaud CLI and the `gpu` and `notify` extras. The default base image is the aarch64 vLLM image (DGX Spark / GB10); on x86_64 pass `--build-arg BASE=vllm/vllm-openai:v0.29.0`, and for the CPU/API mode `--build-arg BASE=python:3.12-slim --build-arg EXTRAS=notify`. The image reads `/plaudit/plaudit.yaml` and expects these mounts: `/plaudit` (config, glossary, data), `/root/.cache/huggingface` (models), `/root/.plaud` (Plaud login), `/root/.config/rclone` (read-only), `/etc/localtime` (read-only).
+`Dockerfile` builds an image with ffmpeg, rclone, Node 22, the Plaud CLI and the `gpu` and `notify` extras. The default base image is the aarch64 vLLM image (DGX Spark / GB10); on x86_64 pass `--build-arg BASE=vllm/vllm-openai:v0.29.0`, and for the CPU/API mode `--build-arg BASE=python:3.12-slim --build-arg EXTRAS=notify`. The image reads `/plaudit/plaudit.yaml` (set `data_dir`, the inbox and the notes folder under `/plaudit` in it, as the templates show) and expects these mounts: `/plaudit` (config, glossary, voices, data), `/root/.cache/huggingface` and `/root/.cache/torch` (models), `/root/.plaud` (Plaud login), `/root/.config/rclone` (read-only), `/etc/localtime` (read-only).
 
 `docker-compose.yml` runs one container per `docker compose run --rm plaudit`; `deploy/systemd/plaudit.service` and `plaudit.timer` start one such container every 5 minutes as a systemd user unit, with a hard memory cap and an 8 h limit per run (a 2 h recording with a slow summariser needs about 3.5 h). The unit sources `~/.config/secrets.env` in a shell and passes the variables from the table above into the container (unset ones are skipped); a `.env` next to `plaudit.yaml` inside the mounted folder works as well. Copy the two unit files to `~/.config/systemd/user/` and run `systemctl --user enable --now plaudit.timer`; stop everything with `systemctl --user disable --now plaudit.timer`.
 
@@ -165,7 +178,7 @@ pytest -q
 
 Releases: `git tag v0.1.1 && git push --tags` builds the package and publishes it to PyPI through trusted publishing (`.github/workflows/release.yml`, no token stored); bump `version` in `pyproject.toml` and `src/plaudit/__init__.py` first.
 
-The tests use fake diarization, ASR and summary backends and need only ffmpeg. The two local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module. The summarizer takes its model as a `chat(system, user) -> str` callable (`OpenAIChat` in production, a function in tests), so chunking, merge rounds and the answer cache are tested without HTTP. Domain terms are in `GLOSSARY.md`.
+The tests use fake diarization, ASR, speaker-embedding and summary backends and need only ffmpeg. The local-model backends (`NemotronDiarizer`, `QwenASRTranscriber`, the three embedders in `voices.py`) have no automated test; they are exercised on the reference GPU box and, on the CPU, with `tests/cpu_smoke.py`. Each stage is a small class with one method (`diarize`, `embed`, `transcribe`, `summarize`, `publish`; outputs may add `publish_stuck`), registered in the `BACKENDS` dict of its module. The summarizer takes its model as a `chat(system, user) -> str` callable (`OpenAIChat` in production, a function in tests), so chunking, merge rounds and the answer cache are tested without HTTP. Domain terms are in `GLOSSARY.md`.
 
 ## License
 

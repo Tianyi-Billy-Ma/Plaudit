@@ -1,5 +1,6 @@
-"""plaudit.yaml loading. Secrets never live here: they come from environment variables, or from a `.env` file
-next to plaudit.yaml (KEY=value lines) for values the environment does not already set."""
+"""plaudit.yaml loading. The config folder is ~/.config/plaudit (plaudit.yaml, .env, glossary.txt, voices/); the
+things a user looks at live in visible folders (~/plaudit/inbox, ~/plaudit/notes) and queue state in ~/.local/share.
+Secrets never live in plaudit.yaml: they come from environment variables, or from the `.env` file next to it."""
 from __future__ import annotations
 
 import copy
@@ -9,8 +10,8 @@ from pathlib import Path
 import yaml
 
 DEFAULTS: dict = {
-    "data_dir": "~/plaudit/data",
-    "glossary": "~/plaudit/glossary.txt",
+    "data_dir": None,  # queue state (jobs, finished job folders): $XDG_DATA_HOME/plaudit, i.e. ~/.local/share/plaudit
+    "glossary": None,  # glossary.txt next to plaudit.yaml
     "language": None,  # None = auto-detect; or "Chinese" / "English"
     "sources": {
         "folder": {"path": "~/plaudit/inbox"},
@@ -19,6 +20,8 @@ DEFAULTS: dict = {
         "upload": {"port": 8787, "token_env": "PLAUDIT_UPLOAD_TOKEN"},  # `plaudit serve`
     },
     "diarization": {"backend": "none", "model": "nvidia/Nemotron-3-Diarization", "max_turn_seconds": 30},
+    # who is Speaker 2: voice samples in `voices` (one audio file per person) are matched against each diarized speaker
+    "speakers": {"backend": "redimnet2", "model": "b6", "voices": None, "threshold": None},  # voices/ next to plaudit.yaml
     "transcription": {"backend": "qwen_asr", "model": "Qwen/Qwen3-ASR-1.7B-hf", "provider": None, "base_url": None,
                       "api_key_env": None},
     "summary": {
@@ -32,7 +35,7 @@ DEFAULTS: dict = {
         "reasoning_effort": None,  # "none" switches a reasoning model's thinking off (GLM, Qwen3, DeepSeek)
     },
     "outputs": {
-        "markdown": {"dir": "~/plaudit/data/notes"},
+        "markdown": {"dir": "~/plaudit/notes"},
         "notion": {"database_id": None, "token_env": "NOTION_TOKEN"},
         "webhook": {"url": None, "url_env": "PLAUDIT_WEBHOOK_URL"},  # JSON POST for n8n, Zapier, Home Assistant
         "notify": {"urls": [], "urls_env": "PLAUDIT_NOTIFY_URLS"},  # Apprise URLs: Slack, Discord, Teams, e-mail...
@@ -63,8 +66,17 @@ def _merge(base: dict, override: dict) -> dict:
     return out
 
 
+def xdg(var: str, fallback: str) -> Path:
+    return Path(os.environ.get(var) or fallback).expanduser() / "plaudit"
+
+
 def config_path(arg: str | os.PathLike | None = None) -> Path:
-    return Path(arg or os.environ.get("PLAUDIT_CONFIG", "~/plaudit/plaudit.yaml")).expanduser()
+    """--config, else $PLAUDIT_CONFIG, else ~/.config/plaudit/plaudit.yaml; the pre-0.2 ~/plaudit/plaudit.yaml is
+    still read when it exists and the new one does not."""
+    if arg or os.environ.get("PLAUDIT_CONFIG"):
+        return Path(arg or os.environ["PLAUDIT_CONFIG"]).expanduser()
+    path, legacy = xdg("XDG_CONFIG_HOME", "~/.config") / "plaudit.yaml", Path("~/plaudit/plaudit.yaml").expanduser()
+    return legacy if not path.exists() and legacy.exists() else path
 
 
 def load(path: str | os.PathLike | None = None) -> dict:
@@ -79,8 +91,10 @@ def load(path: str | os.PathLike | None = None) -> dict:
                 raise ValueError(f"{section}.provider {name!r} unknown; one of: {', '.join(PROVIDERS)}")
             given = (user or {}).get(section) or {}
             cfg[section].update({k: v for k, v in PROVIDERS[name].items() if k in cfg[section] and k not in given})
-    for key in ("data_dir", "glossary"):
-        cfg[key] = str(Path(cfg[key]).expanduser())
+    cfg["data_dir"] = str(Path(cfg["data_dir"]).expanduser() if cfg["data_dir"] else xdg("XDG_DATA_HOME", "~/.local/share"))
+    cfg["glossary"] = str(Path(cfg["glossary"]).expanduser() if cfg["glossary"] else path.with_name("glossary.txt"))
+    v = cfg["speakers"]["voices"]
+    cfg["speakers"]["voices"] = str(Path(v).expanduser() if v else path.with_name("voices"))
     cfg["sources"]["folder"]["path"] = str(Path(cfg["sources"]["folder"]["path"]).expanduser())
     if cfg["outputs"].get("markdown"):
         cfg["outputs"]["markdown"]["dir"] = str(Path(cfg["outputs"]["markdown"]["dir"]).expanduser())
