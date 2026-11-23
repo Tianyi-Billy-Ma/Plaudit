@@ -55,13 +55,13 @@ def get_json(url: str, headers: dict | None = None, timeout: int = 60) -> dict:
 
 
 def post_multipart(url: str, fields: dict[str, str], file_field: str, filename: str, content: bytes,
-                   headers: dict | None = None, timeout: int = 600) -> dict:
+                   headers: dict | None = None, timeout: int = 600, content_type: str = "audio/wav") -> dict:
     boundary = "----plaudit" + str(int(time.time() * 1000))
     body = b""
     for k, v in fields.items():
         body += f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n".encode()
     body += (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; filename=\"{filename}\"\r\n"
-             f"Content-Type: audio/wav\r\n\r\n").encode() + content + f"\r\n--{boundary}--\r\n".encode()
+             f"Content-Type: {content_type}\r\n\r\n").encode() + content + f"\r\n--{boundary}--\r\n".encode()
     hdrs = {"Content-Type": f"multipart/form-data; boundary={boundary}", "User-Agent": UA, **(headers or {})}
     req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
     try:

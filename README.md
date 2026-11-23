@@ -45,11 +45,15 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `speakers.backend` | `redimnet2` | the voice model: `redimnet2` ([ReDimNet2](https://github.com/PalabraAI/redimnet2), the best published open model on both English and Chinese tests, through torch.hub), `xvector` (any `*ForXVector` model on Hugging Face through transformers, e.g. `microsoft/wavlm-base-plus-sv`) or `sherpa` ([sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models): 3D-Speaker ERes2NetV2 and CAM++, WeSpeaker, NeMo TitaNet as ONNX files, CPU only; `pip install "plaudit[sherpa]"`) |
 | `speakers.model` | `b6` | `redimnet2`: the size `b0`..`b6` (`b3` and `b6` have the Chinese-inclusive weights; `b3` for a CPU box); `xvector`: a Hugging Face id; `sherpa`: path of the `.onnx` file |
 | `speakers.threshold` | per backend | cosine similarity a speaker needs to get a name (`redimnet2` 0.5, `xvector` 0.86, `sherpa` 0.5); the log prints every speaker's best match and score, so raise it if strangers get named, lower it if regulars stay `Speaker N` |
-| `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers), `whisper` (local, through faster-whisper) or `openai` (any `/v1/audio/transcriptions` endpoint) |
+| `transcription.backend` | `qwen_asr` | `qwen_asr` (local, through transformers), `whisper` (local, through faster-whisper), `openai` (any `/v1/audio/transcriptions` endpoint, one request per speaker turn) or `openai_diarized` (an endpoint that diarizes too: the whole recording in one request, `diarization.backend` is then ignored) |
 | `transcription.model` | `Qwen/Qwen3-ASR-1.7B-hf` | Hugging Face id, a Whisper size (`turbo`, `large-v3`) or path, or the model name the HTTP endpoint expects |
-| `transcription.provider` | unset | `openai` backend only: `openai` or `groq` fills `base_url` and `api_key_env` (see [Providers](#providers)) |
-| `transcription.base_url` | `null` | `openai` backend only, e.g. `http://localhost:8080/v1` |
-| `transcription.api_key_env` | unset | `openai` backend only: name of the environment variable holding the bearer token |
+| `transcription.provider` | unset | HTTP backends only: `openai` or `groq` fills `base_url` and `api_key_env` (see [Providers](#providers)) |
+| `transcription.base_url` | `null` | HTTP backends only, e.g. `http://localhost:8080/v1` |
+| `transcription.api_key_env` | unset | HTTP backends only: name of the environment variable holding the bearer token |
+| `transcription.max_segment_minutes` | `90` | `openai_diarized` only: longer recordings are cut into equal parts of at most this length, one request each. Speakers are not matched across parts (later parts are labelled `Speaker 1 (part 2)`...); voice samples in `speakers.voices` still name them |
+| `transcription.async` | `true` | `openai_diarized` only: send `Prefer: respond-async` and poll `GET .../audio/transcriptions/{id}` until `status` is `completed`. A server without async support simply answers the request, which is used as is; `false` never asks |
+| `transcription.poll_seconds` | `5` | `openai_diarized` only: time between polls |
+| `transcription.timeout_minutes` | `180` | `openai_diarized` only: how long one part may take, upload plus processing |
 | `summary.provider` | unset | a name from [Providers](#providers); fills `base_url`, `api_key_env` and `temperature` unless you set them yourself |
 | `summary.base_url` | `null` | `/v1` of any OpenAI-compatible chat endpoint; `null` disables the summary (the notes then hold the transcript only) |
 | `summary.model` | `glm-5.3-flash` | model name sent in the request |
@@ -93,6 +97,7 @@ Transcription:
 | `qwen_asr` | locally, GPU | best for Chinese and English mixed in one sentence; the default |
 | `whisper` | locally, CPU or CUDA, `pip install "plaudit[whisper]"` | faster-whisper; `model: turbo` or `large-v3`; weaker on code-switching, set `language` for single-language meetings |
 | `openai` | any `/v1/audio/transcriptions` server | whisper.cpp server, vLLM, [speaches](https://github.com/speaches-ai/speaches), OpenAI (`provider: openai`, `model: gpt-4o-transcribe`) or Groq (`provider: groq`) |
+| `openai_diarized` | any `/v1/audio/transcriptions` server that returns `response_format=diarized_json` | vLLM with [MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize), OpenAI (`provider: openai`, `model: gpt-4o-transcribe-diarize`). The recording is uploaded as one 48 kb/s m4a (about 22 MB an hour); the glossary goes in `prompt`. A server that rejects `diarized_json` fails the job with a message saying so |
 
 ### Secrets
 

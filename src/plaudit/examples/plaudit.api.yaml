@@ -17,6 +17,8 @@ transcription:
   base_url: http://localhost:8080/v1   # e.g. a whisper.cpp server or qwen-asr-serve
   model: whisper-1
   api_key_env: PLAUDIT_ASR_API_KEY
+  # backend: openai_diarized   # an endpoint that diarizes too (vLLM + MOSS-Transcribe-Diarize, gpt-4o-transcribe-diarize):
+  #                            # whole recording in one request, diarization above is then ignored
 
 summary:
   provider: ollama   # or vllm, lmstudio, openai, anthropic, gemini, deepseek, groq, openrouter; or set base_url yourself
