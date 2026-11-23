@@ -20,6 +20,14 @@ def to_wav16k(src: Path, dst: Path) -> Path:
     return dst
 
 
+def to_m4a(src: Path, dst: Path, start: float = 0.0, seconds: float | None = None) -> Path:
+    """AAC mono at 48 kb/s: an hour of speech is ~22 MB instead of 115 MB of WAV, small enough to upload whole."""
+    cut = ["-ss", str(start)] + (["-t", str(seconds)] if seconds else [])
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", *cut, "-i", str(src), "-vn", "-ac", "1", "-ar", str(SAMPLE_RATE),
+                    "-c:a", "aac", "-b:a", "48k", str(dst)], check=True)
+    return dst
+
+
 def duration_seconds(path: Path) -> float:
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", str(path)],

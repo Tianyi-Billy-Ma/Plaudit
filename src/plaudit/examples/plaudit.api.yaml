@@ -17,6 +17,10 @@ transcription:
   base_url: http://localhost:8080/v1   # e.g. a whisper.cpp server or qwen-asr-serve
   model: whisper-1
   api_key_env: PLAUDIT_ASR_API_KEY
+  # backend: openai_diarized   # an endpoint that diarizes too (vLLM + MOSS-Transcribe-Diarize, gpt-4o-transcribe-diarize):
+  #                            # whole recording in one request, diarization above is then ignored
+  # max_segment_minutes: 20      # MOSS-Transcribe-Diarize on vLLM: 32k tokens is about 25 min of audio
+  # prompt_template: "请将音频转写为文本，每一段需以起始时间戳和说话人编号（[S01]、[S02]、[S03]…）开头，正文为对应的语音内容，并在段末标注结束时间戳，以清晰标明该段语音范围。热词提示：{glossary}"
 
 summary:
   provider: ollama   # or vllm, lmstudio, openai, anthropic, gemini, deepseek, groq, openrouter; or set base_url yourself

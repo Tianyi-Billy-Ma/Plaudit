@@ -16,9 +16,10 @@ class Pipeline:
 
     def __init__(self, cfg: dict, diarizer=None, transcriber=None, summarizer=None, sinks=None, namer=None):
         self.cfg = cfg
-        self.diarizer = diarizer or diarize.build(cfg)
-        self.namer = namer or voices.Namer(cfg)
         self.transcriber = transcriber or transcribe.build(cfg)
+        # a backend that diarizes and transcribes in one call (openai_diarized) is the diarizer as well
+        self.diarizer = diarizer or (self.transcriber if hasattr(self.transcriber, "diarize") else diarize.build(cfg))
+        self.namer = namer or voices.Namer(cfg)
         self.summarizer = summarizer or summarize.build(cfg)
         self.sinks = outputs.build(cfg) if sinks is None else sinks
 
