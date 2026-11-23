@@ -50,10 +50,11 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `transcription.provider` | unset | HTTP backends only: `openai` or `groq` fills `base_url` and `api_key_env` (see [Providers](#providers)) |
 | `transcription.base_url` | `null` | HTTP backends only, e.g. `http://localhost:8080/v1` |
 | `transcription.api_key_env` | unset | HTTP backends only: name of the environment variable holding the bearer token |
-| `transcription.max_segment_minutes` | `90` | `openai_diarized` only: longer recordings are cut into equal parts of at most this length, one request each. Speakers are not matched across parts (later parts are labelled `Speaker 1 (part 2)`...); voice samples in `speakers.voices` still name them |
+| `transcription.max_segment_minutes` | `90` | `openai_diarized` only: longer recordings are cut into equal parts of at most this length, one request each. Speakers are not matched across parts (part 2 is labelled `Speaker 1b`, `Speaker 2b`..., part 3 `Speaker 1c`...); voice samples in `speakers.voices` name them, one label per name. A retry reuses the parts already done |
 | `transcription.async` | `true` | `openai_diarized` only: send `Prefer: respond-async` and poll `GET .../audio/transcriptions/{id}` until `status` is `completed`. A server without async support simply answers the request, which is used as is; `false` never asks |
 | `transcription.poll_seconds` | `5` | `openai_diarized` only: time between polls |
 | `transcription.timeout_minutes` | `180` | `openai_diarized` only: how long one part may take, upload plus processing |
+| `transcription.chunking_strategy` | `null` | `openai_diarized` only: sent as is when set; OpenAI's `gpt-4o-transcribe-diarize` needs `auto` for audio over 30 s |
 | `summary.provider` | unset | a name from [Providers](#providers); fills `base_url`, `api_key_env` and `temperature` unless you set them yourself |
 | `summary.base_url` | `null` | `/v1` of any OpenAI-compatible chat endpoint; `null` disables the summary (the notes then hold the transcript only) |
 | `summary.model` | `glm-5.3-flash` | model name sent in the request |
@@ -97,7 +98,7 @@ Transcription:
 | `qwen_asr` | locally, GPU | best for Chinese and English mixed in one sentence; the default |
 | `whisper` | locally, CPU or CUDA, `pip install "plaudit[whisper]"` | faster-whisper; `model: turbo` or `large-v3`; weaker on code-switching, set `language` for single-language meetings |
 | `openai` | any `/v1/audio/transcriptions` server | whisper.cpp server, vLLM, [speaches](https://github.com/speaches-ai/speaches), OpenAI (`provider: openai`, `model: gpt-4o-transcribe`) or Groq (`provider: groq`) |
-| `openai_diarized` | any `/v1/audio/transcriptions` server that returns `response_format=diarized_json` | vLLM with [MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize), OpenAI (`provider: openai`, `model: gpt-4o-transcribe-diarize`). The recording is uploaded as one 48 kb/s m4a (about 22 MB an hour); the glossary goes in `prompt`. A server that rejects `diarized_json` fails the job with a message saying so |
+| `openai_diarized` | any `/v1/audio/transcriptions` server that returns `response_format=diarized_json` | vLLM with [MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize), OpenAI (`provider: openai`, `model: gpt-4o-transcribe-diarize`, `chunking_strategy: auto`). The recording is uploaded as one 48 kb/s m4a (about 22 MB an hour); the glossary goes in `prompt`. A server that rejects `diarized_json` fails the job with a message saying so |
 
 ### Secrets
 

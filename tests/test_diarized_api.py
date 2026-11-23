@@ -1,4 +1,4 @@
-"""openai_diarized backend against a mock /v1/audio/transcriptions server (async, sync fallback, errors, splitting)."""
+"""openai_diarized backend against a mock /v1/audio/transcriptions server (async, sync fallback, errors, splitting, resume)."""
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -12,6 +12,7 @@ class Mock:
     def __init__(self, mode="async", reject=False):
         self.mode, self.reject = mode, reject
         self.posts, self.polls, self.jobs = [], 0, {}
+        self.ack, self.plain = {}, False
 
 
 def answer(n):
@@ -43,11 +44,11 @@ def server():
             state.posts.append({"body": body, "prefer": self.headers.get("Prefer"), "auth": self.headers.get("Authorization")})
             if state.reject:
                 return self.reply(400, {"error": {"message": "response_format 'diarized_json' is not supported"}})
-            res = answer(len(state.posts))
+            res = {"text": "plain"} if state.plain else answer(len(state.posts))
             if state.mode in ("async", "fail") and self.headers.get("Prefer") == "respond-async":
                 job = f"tr_{len(state.posts)}"
                 state.jobs[job] = res
-                return self.reply(202, {"id": job, "status": "queued"})
+                return self.reply(202, {"id": job, "status": "queued", **state.ack})
             self.reply(200, res)  # sync server, or one that ignores Prefer
 
         def do_GET(self):
@@ -99,6 +100,7 @@ def test_server_that_ignores_prefer_answers_synchronously(api_cfg, server, clip,
     segs = transcribe.build(api_cfg).diarize(wav16k(clip, tmp_path))
     assert server.polls == 0 and len(segs) == 2
     api_cfg["transcription"]["async"] = False
+    (tmp_path / "diarized-1of1.json").unlink()  # finished parts are reused otherwise
     transcribe.build(api_cfg).diarize(wav16k(clip, tmp_path))
     assert server.posts[-1]["prefer"] is None
 
@@ -127,7 +129,33 @@ def test_long_recording_is_split_with_offsets(api_cfg, server, clip, tmp_path):
     assert len(server.posts) == 2
     assert [(s.start, s.speaker, s.text) for s in segs] == [
         (0.0, "Speaker 1", "你好 part1"), (1.5, "Speaker 2", "hello"),
-        (2.0, "Speaker 1 (part 2)", "你好 part2"), (3.5, "Speaker 2 (part 2)", "hello")]
+        (2.0, "Speaker 1b", "你好 part2"), (3.5, "Speaker 2b", "hello")]
+
+
+def test_retry_after_a_failed_part_reuses_the_finished_ones(api_cfg, server, clip, tmp_path):
+    from plaudit import transcribe
+
+    api_cfg["transcription"]["max_segment_minutes"] = 2.5 / 60
+    wav = wav16k(clip, tmp_path)
+    (tmp_path / "diarized-1of2.json").write_text('{"segments": [{"start": 0, "end": 1, "speaker": "x", "text": "cached"}]}')
+    segs = transcribe.build(api_cfg).diarize(wav)
+    assert len(server.posts) == 1 and segs[0].text == "cached" and (tmp_path / "diarized-2of2.json").exists()
+
+
+def test_queued_reply_with_null_text_is_polled_not_taken_as_empty(api_cfg, server, clip, tmp_path):
+    from plaudit import transcribe
+
+    server.ack = {"text": None}
+    segs = transcribe.build(api_cfg).diarize(wav16k(clip, tmp_path))
+    assert server.polls == 2 and len(segs) == 2
+
+
+def test_answer_without_segments_is_an_error(api_cfg, server, clip, tmp_path):
+    from plaudit import transcribe
+
+    server.mode, server.plain = "sync", True
+    with pytest.raises(RuntimeError, match="without segments"):
+        transcribe.build(api_cfg).diarize(wav16k(clip, tmp_path))
 
 
 def test_pipeline_uses_the_api_as_diarizer_and_transcriber(api_cfg, server, clip, tmp_path):
