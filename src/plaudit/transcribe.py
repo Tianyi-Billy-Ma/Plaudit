@@ -116,6 +116,9 @@ class DiarizedAPITranscriber(OpenAICompatTranscriber):
         self.use_async, self.poll = tc["async"], tc["poll_seconds"]
         self.timeout = tc["timeout_minutes"] * 60
         self.chunking = tc["chunking_strategy"]
+        # some models (MOSS-Transcribe-Diarize) take `prompt` as their whole instruction, so the glossary is wrapped
+        if (tpl := tc["prompt_template"]) and self.prompt:
+            self.prompt = tpl.replace("{glossary}", self.prompt)
 
     def diarize(self, wav: Path) -> list[Segment]:
         total = duration_seconds(wav)

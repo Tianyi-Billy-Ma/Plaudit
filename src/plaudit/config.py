@@ -26,7 +26,7 @@ DEFAULTS: dict = {
                       "api_key_env": None,
                       # openai_diarized only: one upload per recording, split past this; async polls GET .../{id}
                       "max_segment_minutes": 90, "async": True, "poll_seconds": 5, "timeout_minutes": 180,
-                      "chunking_strategy": None},  # OpenAI's gpt-4o-transcribe-diarize needs "auto" past 30 s
+                      "chunking_strategy": None, "prompt_template": None},  # OpenAI's gpt-4o-transcribe-diarize needs "auto" past 30 s
     "summary": {
         "provider": None,  # a PROVIDERS name: fills base_url / api_key_env (/ temperature) unless set explicitly
         "base_url": None,

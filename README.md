@@ -54,6 +54,7 @@ Python 3.10+ on Linux or macOS. Local models need transformers 5.19+ and roughly
 | `transcription.async` | `true` | `openai_diarized` only: send `Prefer: respond-async` and poll `GET .../audio/transcriptions/{id}` until `status` is `completed`. A server without async support simply answers the request, which is used as is; `false` never asks |
 | `transcription.poll_seconds` | `5` | `openai_diarized` only: time between polls |
 | `transcription.timeout_minutes` | `180` | `openai_diarized` only: how long one part may take, upload plus processing |
+| `transcription.prompt_template` | `null` | `openai_diarized` only: the `prompt` sent, with `{glossary}` replaced by the comma-joined glossary; `null` sends the glossary alone. Needed for models whose `prompt` replaces their instruction, see the MOSS example in `examples/plaudit.api.yaml` |
 | `transcription.chunking_strategy` | `null` | `openai_diarized` only: sent as is when set; OpenAI's `gpt-4o-transcribe-diarize` needs `auto` for audio over 30 s |
 | `summary.provider` | unset | a name from [Providers](#providers); fills `base_url`, `api_key_env` and `temperature` unless you set them yourself |
 | `summary.base_url` | `null` | `/v1` of any OpenAI-compatible chat endpoint; `null` disables the summary (the notes then hold the transcript only) |
@@ -98,7 +99,7 @@ Transcription:
 | `qwen_asr` | locally, GPU | best for Chinese and English mixed in one sentence; the default |
 | `whisper` | locally, CPU or CUDA, `pip install "plaudit[whisper]"` | faster-whisper; `model: turbo` or `large-v3`; weaker on code-switching, set `language` for single-language meetings |
 | `openai` | any `/v1/audio/transcriptions` server | whisper.cpp server, vLLM, [speaches](https://github.com/speaches-ai/speaches), OpenAI (`provider: openai`, `model: gpt-4o-transcribe`) or Groq (`provider: groq`) |
-| `openai_diarized` | any `/v1/audio/transcriptions` server that returns `response_format=diarized_json` | vLLM with [MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize), OpenAI (`provider: openai`, `model: gpt-4o-transcribe-diarize`, `chunking_strategy: auto`). The recording is uploaded as one 48 kb/s m4a (about 22 MB an hour); the glossary goes in `prompt`. A server that rejects `diarized_json` fails the job with a message saying so |
+| `openai_diarized` | any `/v1/audio/transcriptions` server that returns `response_format=diarized_json` | vLLM with [MOSS-Transcribe-Diarize](https://huggingface.co/OpenMOSS-Team/MOSS-Transcribe-Diarize) (needs `vllm[audio]`; its 32k context holds about 25 min of audio, so set `max_segment_minutes: 20`, and `prompt_template`), OpenAI (`provider: openai`, `model: gpt-4o-transcribe-diarize`, `chunking_strategy: auto`). The recording is uploaded as one 48 kb/s m4a (about 22 MB an hour); the glossary goes in `prompt`. A server that rejects `diarized_json` fails the job with a message saying so |
 
 ### Secrets
 

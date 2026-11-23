@@ -164,3 +164,12 @@ def test_pipeline_uses_the_api_as_diarizer_and_transcriber(api_cfg, server, clip
     out = Pipeline(api_cfg, summarizer=FakeSummarizer(), sinks=[]).process(clip, {"title": "t", "date": "2026-11-23", "source": "folder"}, tmp_path / "job")
     assert len(server.posts) == 1
     assert "Speaker 2: hello" in out["transcript"].as_text()
+
+
+def test_prompt_template_wraps_the_glossary(api_cfg, server, clip, tmp_path):
+    from plaudit import transcribe
+
+    (tmp_path / "glossary.txt").write_text("Plaudit\n饭耳\n")
+    api_cfg["transcription"]["prompt_template"] = "转写并分说话人。热词：{glossary}"
+    transcribe.build(api_cfg).diarize(wav16k(clip, tmp_path))
+    assert "转写并分说话人。热词：Plaudit, 饭耳".encode() in server.posts[0]["body"]
