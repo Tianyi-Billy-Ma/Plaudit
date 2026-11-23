@@ -131,9 +131,11 @@ class DiarizedAPITranscriber(OpenAICompatTranscriber):
                     part = to_m4a(wav, Path(d) / f"part{i}.m4a", start, total / n if n > 1 else None)
                     log.info("uploading part %d/%d (%.1f MB)", i + 1, n, part.stat().st_size / 1e6)
                     resp = self._request(part)
-                    done.write_text(json.dumps(resp, ensure_ascii=False))
                 # shortcut: speakers are not matched across parts (part 2 says `Speaker 1b`); voices/ can name them
                 out += parse_diarized(resp, start, chr(ord("a") + i) if i else "")
+                if not done.exists():  # only once it parsed, and atomically, so a bad cache never blocks retries
+                    done.with_suffix(".tmp").write_text(json.dumps(resp, ensure_ascii=False))
+                    done.with_suffix(".tmp").replace(done)
         return out
 
     def transcribe(self, wav: Path, turns: list[Segment]) -> list[Segment]:
